@@ -77,31 +77,31 @@
 
 ### 后端
 
-- [ ] BilibiliSubtitleProvider — 字幕适配层（UP 主字幕 > 自动字幕 > AI 字幕）
-- [ ] 字幕 JSON 标准化（统一 start_time / end_time / text 格式）
-- [ ] Celery Worker 搭建（`celery_app.py`、任务路由、状态更新）
-- [ ] `POST /api/analysis-tasks` 创建分析任务
-- [ ] `GET /api/analysis-tasks/{id}` 查询任务状态
-- [ ] LLM Provider 抽象层（OpenAI 兼容接口）
-- [ ] 总结 + 章节 Prompt（`prompts/summary_chapters_v1.txt`）
-- [ ] LLM JSON 结构化输出校验（Pydantic 二次校验 + 一次自动修复重试）
-- [ ] 长文案 chunk 切分 → 局部摘要 → 合并策略
-- [ ] 任务状态机（waiting → running → completed / failed）
+- [x] BilibiliSubtitleProvider — 字幕适配层（UP 主字幕 > 自动字幕 > AI 字幕）
+- [x] 字幕 JSON 标准化（统一 start_time / end_time / text 格式）
+- [x] Celery Worker 搭建（`celery_app.py`、任务路由、状态更新）
+- [x] `POST /api/analysis-tasks` 创建分析任务
+- [x] `GET /api/analysis-tasks/{id}` 查询任务状态
+- [x] LLM Provider 抽象层（OpenAI 兼容接口）
+- [x] 总结 + 章节 Prompt（`prompts/summary_chapters_v1.txt`）
+- [x] LLM JSON 结构化输出校验（Pydantic 二次校验 + 一次自动修复重试）
+- [x] 长文案 chunk 切分 → 局部摘要 → 合并策略
+- [x] 任务状态机（waiting → running → completed / failed）
 
 ### Web
 
-- [ ] PartSelector 组件 — 选择分析范围
-- [ ] TaskProgress 页面 — 轮询展示任务状态和进度
-- [ ] PartAnalysisView 页面 — 单 P 文案、总结、章节
-- [ ] ChapterList 组件 — 可点击章节时间点
-- [ ] TranscriptView 组件 — 带时间戳文案展示
+- [x] PartSelector 组件 — 选择分析范围
+- [x] TaskProgress 页面 — 轮询展示任务状态和进度
+- [x] PartAnalysisView 页面 — 单 P 文案、总结、章节
+- [x] ChapterList 组件 — 可点击章节时间点
+- [x] TranscriptView 组件 — 带时间戳文案展示
 
 ### 测试
 
-- [ ] 字幕标准化单元测试
-- [ ] LLM JSON 校验单元测试
-- [ ] 任务状态机流转测试
-- [ ] 长文案切分单元测试
+- [x] 字幕标准化单元测试
+- [x] LLM JSON 校验单元测试
+- [x] 任务状态机流转测试
+- [x] 长文案切分单元测试
 
 ---
 
