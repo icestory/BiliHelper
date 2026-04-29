@@ -1,0 +1,19 @@
+# Python 虚拟环境
+.venv/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 构建产物
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+
+# 环境配置
+.env
