@@ -150,6 +150,87 @@ class AnalysisService:
             finished_at=sub.finished_at.isoformat() if sub and sub.finished_at else None,
         )
 
+    def retry_task(self, user_id: int, task_id: int) -> AnalysisTaskResponse:
+        task = self.db.query(AnalysisTask).filter(AnalysisTask.id == task_id).first()
+        if not task:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+        if task.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权操作此任务")
+
+        if task.status not in ("failed", "partial_failed"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅失败任务支持重试")
+
+        # 重置失败子任务的状态
+        failed_subs = (
+            self.db.query(PartAnalysisTask)
+            .filter(PartAnalysisTask.analysis_task_id == task_id, PartAnalysisTask.status == "failed")
+            .all()
+        )
+        for sub in failed_subs:
+            sub.status = "waiting"
+            sub.progress = 0
+            sub.error_message = None
+            sub.started_at = None
+            sub.finished_at = None
+            sub.retry_count = (sub.retry_count or 0) + 1
+
+        task.status = "waiting"
+        task.error_message = None
+        task.finished_at = None
+        self.db.commit()
+
+        # 重新投递
+        from app.workers.tasks.analyze_part import start_analysis
+        start_analysis.delay(task.id)
+
+        return self._to_response(task)
+
+    def reanalyze_part(self, user_id: int, part_id: int, force: bool = False) -> PartAnalysisDetail:
+        """重新分析单个分 P"""
+        part = video_repository.get_part_by_id(self.db, part_id)
+        if not part:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分 P 不存在")
+
+        # 获取视频归属判断权限
+        video = video_repository.get_video_by_id(self.db, part.video_id)
+        if not video:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="视频不存在")
+
+        # 创建独立的任务
+        task = AnalysisTask(
+            user_id=user_id,
+            video_id=part.video_id,
+            selected_part_ids=[part_id],
+            force_reanalyze=force,
+            status="waiting",
+            progress=0,
+        )
+        self.db.add(task)
+        self.db.flush()
+
+        sub = PartAnalysisTask(
+            analysis_task_id=task.id,
+            video_part_id=part_id,
+            status="waiting",
+            progress=0,
+        )
+        self.db.add(sub)
+        self.db.commit()
+
+        from app.workers.tasks.analyze_part import start_analysis
+        start_analysis.delay(task.id)
+
+        return PartAnalysisDetail(
+            id=sub.id,
+            video_part_id=part_id,
+            status="waiting",
+            transcript_source=None,
+            transcript_segments=None,
+            summary=None,
+            chapters=None,
+            error_message=None,
+        )
+
     def _to_response(self, task: AnalysisTask) -> AnalysisTaskResponse:
         subs = (
             self.db.query(PartAnalysisTask)

@@ -65,3 +65,16 @@ class VideoDetailResponse(BaseModel):
     part_count: int
     parts: list[PartResponse]
     created_at: str
+
+
+class VideoSummaryResponse(BaseModel):
+    id: int | None = None
+    video_id: int
+    summary: str | None = None
+    detailed_summary: str | None = None
+    part_overview: dict | None = None
+    key_points: list[str] | None = None
+    model_provider: str | None = None
+    model_name: str | None = None
+    prompt_version: str | None = None
+    created_at: str | None = None

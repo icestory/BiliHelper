@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.video import VideoParseRequest, VideoParseResponse, VideoHistoryResponse, VideoDetailResponse
+from app.schemas.video import VideoParseRequest, VideoParseResponse, VideoHistoryResponse, VideoDetailResponse, VideoSummaryResponse
 from app.services.video_service import VideoService
+from app.models.summary import VideoSummary
 
 router = APIRouter(prefix="/api/videos", tags=["视频"])
 
@@ -43,3 +44,24 @@ def delete_video_history(
 ):
     """删除视频分析历史"""
     VideoService(db).delete_history(current_user.id, video_id)
+
+
+@router.get("/{video_id}/summary", response_model=VideoSummaryResponse)
+def get_video_summary(video_id: int, db: Session = Depends(get_db)):
+    """获取视频的全视频总览总结"""
+    vs = db.query(VideoSummary).filter(VideoSummary.video_id == video_id).order_by(VideoSummary.id.desc()).first()
+    if not vs:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="全视频总结尚未生成")
+    return VideoSummaryResponse(
+        id=vs.id,
+        video_id=vs.video_id,
+        summary=vs.summary,
+        detailed_summary=vs.detailed_summary,
+        part_overview=vs.part_overview,
+        key_points=vs.key_points,
+        model_provider=vs.model_provider,
+        model_name=vs.model_name,
+        prompt_version=vs.prompt_version,
+        created_at=vs.created_at.isoformat() if vs.created_at else None,
+    )

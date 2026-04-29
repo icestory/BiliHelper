@@ -15,6 +15,18 @@ export function getAnalysisTask(taskId: number) {
   return apiFetch(`/analysis-tasks/${taskId}`);
 }
 
+export function retryAnalysisTask(taskId: number) {
+  return apiFetch(`/analysis-tasks/${taskId}/retry`, { method: "POST" });
+}
+
+export function reanalyzePart(partId: number, force = false) {
+  return apiFetch(`/parts/${partId}/reanalyze?force=${force}`, { method: "POST" });
+}
+
 export function getPartAnalysis(partId: number) {
   return apiFetch(`/parts/${partId}/analysis`);
+}
+
+export function getVideoSummary(videoId: number) {
+  return apiFetch(`/videos/${videoId}/summary`);
 }

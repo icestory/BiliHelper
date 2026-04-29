@@ -48,3 +48,16 @@ export interface VideoDetailResponse extends VideoInfo {
   parts: PartInfo[];
   created_at: string;
 }
+
+export interface VideoSummaryResponse {
+  id: number | null;
+  video_id: number;
+  summary: string | null;
+  detailed_summary: string | null;
+  part_overview: Record<string, string> | null;
+  key_points: string[] | null;
+  model_provider: string | null;
+  model_name: string | null;
+  prompt_version: string | null;
+  created_at: string | null;
+}

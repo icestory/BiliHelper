@@ -137,26 +137,26 @@
 
 ### 后端
 
-- [ ] 分 P 选择支持（全部 / 当前 P / 自定义选择）
-- [ ] 每 P 独立 `part_analysis_task`
-- [ ] Worker 并发/串行处理各 P
-- [ ] 全视频总结生成（基于各 P 总结聚合）
-- [ ] `partial_failed` 状态支持
-- [ ] `POST /api/analysis-tasks/{id}/retry` 失败重试
-- [ ] `POST /api/parts/{part_id}/reanalyze` 单 P 重新分析
+- [x] 分 P 选择支持（全部 / 当前 P / 自定义选择）
+- [x] 每 P 独立 `part_analysis_task`
+- [x] Worker 并发/串行处理各 P
+- [x] 全视频总结生成（基于各 P 总结聚合）
+- [x] `partial_failed` 状态支持
+- [x] `POST /api/analysis-tasks/{id}/retry` 失败重试
+- [x] `POST /api/parts/{part_id}/reanalyze` 单 P 重新分析
 
 ### Web
 
-- [ ] 分 P 选择 UI（复选框 + 全选）
-- [ ] 多 P 任务进度展示（各 P 独立状态）
-- [ ] 全视频总结展示
-- [ ] 重试按钮
+- [x] 分 P 选择 UI（复选框 + 全选）
+- [x] 多 P 任务进度展示（各 P 独立状态）
+- [x] 全视频总结展示
+- [x] 重试按钮
 
 ### 测试
 
-- [ ] 分 P 多任务并发测试
-- [ ] partial_failed 状态流转测试
-- [ ] 单 P 重试测试
+- [x] 分 P 多任务并发测试
+- [x] partial_failed 状态流转测试
+- [x] 单 P 重试测试
 
 ---
 

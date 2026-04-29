@@ -280,8 +280,14 @@ def start_analysis(self, task_id: int):
                 sub.finished_at = _utcnow()
                 db.commit()
 
+        # 全视频总结（所有分P完成且有至少一个成功时）
+        if completed > 0 and total > 0:
+            try:
+                _generate_video_summary(db, task.video_id, task.user_id)
+            except Exception:
+                pass  # 视频总结失败不影响任务整体状态
+
         # 更新总任务状态
-        total = len(subs)
         if completed == total:
             task.status = "completed"
             task.progress = 100
@@ -329,6 +335,54 @@ def _get_asr_provider(db, user_id: int):
         base_url=cred.api_base_url,
         model=asr_model,
     )
+
+
+def _generate_video_summary(db, video_id: int, user_id: int):
+    """生成全视频总览总结（聚合各分P总结）"""
+    from app.models.summary import PartSummary, VideoSummary
+    from app.models.video import VideoPart
+
+    # 汇集已完成分 P 的总结
+    parts = db.query(VideoPart).filter(VideoPart.video_id == video_id).order_by(VideoPart.page_no).all()
+    part_summaries = {}
+    for part in parts:
+        ps = (
+            db.query(PartSummary)
+            .filter(PartSummary.video_part_id == part.id)
+            .order_by(PartSummary.id.desc())
+            .first()
+        )
+        if ps and ps.summary:
+            part_summaries[str(part.page_no)] = ps.summary
+
+    if not part_summaries:
+        return
+
+    provider = _get_llm_provider(db, user_id)
+    prompt = _load_prompt("video_summary_v1")
+
+    parts_text = "\n".join(
+        f"P{pn}: {summary}" for pn, summary in sorted(part_summaries.items(), key=lambda x: int(x[0]))
+    )
+
+    result = provider.chat_json(
+        system_prompt=prompt,
+        user_message=f"以下是一个视频各分P的总结，请生成全视频总览：\n\n{parts_text}",
+    )
+
+    cred = _get_cred(db, user_id)
+    vs = VideoSummary(
+        video_id=video_id,
+        summary=result.get("summary", ""),
+        detailed_summary=result.get("detailed_summary", ""),
+        part_overview=result.get("part_overview", {}),
+        key_points=result.get("key_points", []),
+        model_provider=cred.provider if cred else "unknown",
+        model_name=cred.default_model if cred else "unknown",
+        prompt_version="video_summary_v1",
+    )
+    db.add(vs)
+    db.commit()
 
 
 def _validate_result(result: dict) -> None:
