@@ -13,8 +13,10 @@ from app.models.transcript import TranscriptSegment
 from app.models.summary import PartSummary, Chapter
 from app.models.user import ApiCredential
 from app.repositories import video_repository
-from app.integrations.bilibili.subtitles import get_subtitles
+from app.integrations.bilibili.subtitles import get_subtitles, check_subtitle_available
+from app.integrations.bilibili.audio import extract_audio, cleanup_audio
 from app.integrations.llm import OpenAICompatibleProvider
+from app.integrations.asr import OpenAIASRProvider, ASRSegment
 
 
 def _utcnow():
@@ -177,11 +179,45 @@ def start_analysis(self, task_id: int):
                 segments, source = get_subtitles(video.bvid, part.cid or 0)
 
                 if not segments:
-                    # M3 将在此处添加 ASR 兜底
-                    sub.status = "failed"
-                    sub.error_message = "无可用字幕（ASR 兜底将在后续版本支持）"
+                    # ASR 兜底：提取临时音频 → 语音识别
+                    sub.status = "extracting_audio"
+                    sub.progress = 10
                     db.commit()
-                    continue
+
+                    audio_path = None
+                    try:
+                        audio_path = extract_audio(video.bvid, part.cid or 0, part.page_no)
+
+                        sub.status = "transcribing"
+                        sub.progress = 25
+                        db.commit()
+
+                        # 获取 ASR provider（优先用 OpenAI STT，后续可配置）
+                        asr_provider = _get_asr_provider(db, task.user_id)
+                        asr_segments = asr_provider.transcribe(audio_path)
+
+                        # 转换为统一格式
+                        segments = []
+                        for i, seg in enumerate(asr_segments):
+                            if not seg.text.strip():
+                                continue
+                            from app.integrations.bilibili.subtitles import SubtitleSegment
+                            segments.append(SubtitleSegment(
+                                start_time=seg.start_time,
+                                end_time=seg.end_time,
+                                text=seg.text.strip(),
+                            ))
+
+                        if len(segments) < 3:
+                            sub.status = "failed"
+                            sub.error_message = "ASR 识别结果过短，可能音频质量不佳"
+                            db.commit()
+                            continue
+
+                        source = "asr"
+                    finally:
+                        if audio_path:
+                            cleanup_audio(audio_path)
 
                 # Step 2: 保存 transcript
                 _save_transcript(db, sub.video_part_id, segments, source)
@@ -277,6 +313,22 @@ def _get_cred(db, user_id: int) -> ApiCredential | None:
     return db.query(ApiCredential).filter(
         ApiCredential.user_id == user_id, ApiCredential.is_default == True  # noqa: E712
     ).first()
+
+
+def _get_asr_provider(db, user_id: int):
+    """获取用户的 ASR provider，默认使用 OpenAI STT"""
+    cred = _get_cred(db, user_id)
+    if not cred:
+        raise ValueError("未配置大模型 API Key")
+
+    api_key = decrypt_api_key(cred.api_key_encrypted)
+    asr_model = cred.default_asr_model or "whisper-1"
+
+    return OpenAIASRProvider(
+        api_key=api_key,
+        base_url=cred.api_base_url,
+        model=asr_model,
+    )
 
 
 def _validate_result(result: dict) -> None:

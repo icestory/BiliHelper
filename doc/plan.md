@@ -111,23 +111,23 @@
 
 ### 后端
 
-- [ ] AudioExtractor — yt-dlp + FFmpeg 提取临时音频
-- [ ] 音频格式转换（mono wav/mp3）
-- [ ] ASR Provider 抽象层
-- [ ] OpenAI Speech-to-Text Provider（云端）
-- [ ] faster-whisper Provider（本地，可选）
-- [ ] 音频切片（处理文件大小限制）
-- [ ] 分片结果合并 + 时间偏移修正
-- [ ] 临时音频清理（任务完成/失败后自动删除）
+- [x] AudioExtractor — yt-dlp + FFmpeg 提取临时音频
+- [x] 音频格式转换（mono wav/mp3）
+- [x] ASR Provider 抽象层
+- [x] OpenAI Speech-to-Text Provider（云端）
+- [x] faster-whisper Provider（本地，可选）
+- [x] 音频切片（处理文件大小限制）
+- [x] 分片结果合并 + 时间偏移修正
+- [x] 临时音频清理（任务完成/失败后自动删除）
 
 ### Web
 
-- [ ] 分析进度中区分"获取字幕"和"语音识别"状态
+- [x] 分析进度中区分"获取字幕"和"语音识别"状态
 
 ### 测试
 
-- [ ] 音频切片/合并逻辑单元测试
-- [ ] ASR 结果标准化测试
+- [x] 音频切片/合并逻辑单元测试
+- [x] ASR 结果标准化测试
 
 ---
 

@@ -62,6 +62,8 @@ export function formatTime(seconds: number): string {
 export const STATUS_LABELS: Record<string, string> = {
   waiting: "等待中",
   fetching_subtitle: "正在获取字幕",
+  extracting_audio: "正在提取音频",
+  transcribing: "正在进行语音识别",
   asr: "正在进行语音识别",
   summarizing: "正在生成总结",
   completed: "已完成",
