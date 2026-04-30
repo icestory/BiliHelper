@@ -1,370 +1,258 @@
-# BiliHelper 代码审查报告
+# BiliHelper 第二轮代码审查报告
 
-审查日期：2026-04-29  
-审查范围：M0-M4 全部代码（后端 + 前端 + 部署配置）
-
----
-
-## 严重问题 (CRITICAL) — 必须修复才能运行
-
-### 1. Worker 中未定义变量 `total` → NameError
-
-**文件：** `backend/app/workers/tasks/analyze_part.py`  
-**行号：** 284, 291, 293, 296
-
-变量 `total` 使用了四次但从未赋值。缺少 `total = len(subs)`。任何 completed/partial_failed 的分析任务都会触发 `NameError`，导致整个分析管道不可用。
-
-```python
-# 缺少：total = len(subs)
-if completed > 0 and total > 0:   # NameError
-    ...
-if completed == total:             # NameError
-```
-
-### 2. `loadTokens()` 从未调用 — 页面刷新后认证丢失
-
-**文件：** `web/src/api/client.ts` + `web/src/main.tsx`  
-**行号：** client.ts:16-19
-
-`loadTokens()` 已导出但从未被导入或调用。页面刷新后，内存中的 `accessToken` 和 `refreshToken` 保持为 `null`（虽然 localStorage 中有 token）。所有 API 调用因为缺少 Authorization header 而返回 401，用户被迫每次刷新后重新登录。
-
-修复：在 `main.tsx` 中应用渲染前调用 `loadTokens()`。
-
-### 3. Encryption key 无效 — 任何加密操作都会 crash
-
-**文件：** `.env.example` + `backend/app/core/security.py`  
-**行号：** .env.example:7, security.py:45
-
-`.env.example` 中的 `CREDENTIAL_ENCRYPTION_KEY=generate-with-fernet-generate-key` 不是有效的 base64 32 字节 Fernet key。`Fernet(key)` 将抛出 `ValueError`。API Key 的加解密全部不可用。
-
-### 4. Docker Compose 缺少 `.env` 文件 — 无法启动
-
-**文件：** `docker-compose.yml`  
-**行号：** 18, 33
-
-`docker-compose.yml` 引用 `env_file: .env`，但该文件不存在（仅有 `.env.example`）。`docker compose up` 会直接失败。
+审查日期：2026-04-30  
+审查范围：M0-M5 全部代码（含 M5 新增：问答、导出、Chunk 聚合）  
+审查方式：4 个 Agent 并行审查（backend core + services/API + integrations/workers + frontend/deploy）
 
 ---
 
-## 高严重性 (HIGH) — 影响功能正确性
+## 严重问题 (CRITICAL) — 运行时一定崩溃
 
-### 5. JWT `sub` 缺失/非数字 → 500 错误
+### 1. ASR 大文件处理：`output_dir` 未定义 → NameError
 
-**文件：** `backend/app/core/dependencies.py`  
-**行号：** 26
+**文件：** `backend/app/integrations/asr/openai_asr.py:54` + `backend/app/integrations/asr/faster_whisper_asr.py:74`
 
-`payload["sub"]` 直接访问字典键。如果 token 解码成功但缺少 `"sub"`（KeyError），或 `"sub"` 为非数字字符串（ValueError），会返回 500 而非 401。应使用 `payload.get("sub")` 并捕获类型转换异常。
+两个 ASR provider 的 `transcribe()` 方法中，`_split_audio()` 在函数内部创建了 `output_dir` 局部变量但从未返回。外层直接使用 `os.rmdir(output_dir)` 导致 `NameError`。**任何超过 25MB（OpenAI）或 5 分钟（faster-whisper）的音频文件都会在 ASR 阶段崩溃。**
 
-### 6. Refresh token 可作为 Access token 使用
+修复：`_split_audio` 返回 `(slices, output_dir)` 元组。
 
-**文件：** `backend/app/core/security.py` + `dependencies.py`  
-**行号：** security.py:26, dependencies.py:19-26
+### 2. 导出端点完全无认证 — 任意用户可下载所有数据
 
-`decode_token` 不验证 `type` claim。refresh token （`"type": "refresh"`，有效期 30 天）可被当作 access token 使用，绕过短期过期策略。
+**文件：** `backend/app/api/exports.py:12,29`
 
-### 7. `get_part_analysis` 无权限检查 — 任意用户可读取任意分 P 数据
+`download_video_md` 和 `download_part_md` 均无 `get_current_user` 依赖。任何人知晓 video_id/part_id 即可下载完整文案、总结、章节和问答记录。
 
-**文件：** `backend/app/services/analysis_service.py`  
-**行号：** 80
+修复：添加 `Depends(get_current_user)` + 服务层所有权校验。
 
-`get_part_analysis(part_id)` 不接受 `user_id` 参数，不检查所有权。API 路由获取了 `current_user` 但未传递给 service。任何认证用户可查看任意视频的文案、总结和章节。
+### 3. QA 引用查询使用了错误的数据库列
 
-### 8. `get_video_summary` 无认证依赖 — 公开访问
-
-**文件：** `backend/app/api/videos.py`  
-**行号：** 49-50
-
-`GET /api/videos/{video_id}/summary` 没有 `get_current_user` 依赖，是该文件唯一不需要认证的端点，任何人都可访问。
-
-### 9. B站 API 返回 `"owner": null` 时 metadata 解析崩溃（AttributeError）
-
-**文件：** `backend/app/integrations/bilibili/metadata.py`  
-**行号：** 62-63
+**文件：** `backend/app/services/qa_service.py:195`
 
 ```python
-owner_name=data.get("owner", {}).get("name", ""),
+.filter(VideoPart.video_id.in_([p for p in part_ids]), ...)
 ```
 
-`data.get("owner", {})` 仅在键缺失时返回 `{}`。如果 API 返回 `"owner": null`，则返回 `None`，`.get("name")` → `AttributeError`。已删除/受限视频会触发此 bug。
+`part_ids` 是 `VideoPart.id` 列表（主键），但查询却比较了 `VideoPart.video_id`（外键），导致引用永远找不到正确的 part。所有问答引用中的 `part_id` 都会是 `None`。
 
-### 10. ASR 音频 yt-dlp 假阳性超时
+修复：改为 `VideoPart.id.in_(part_ids)`。
 
-**文件：** `backend/app/integrations/bilibili/audio.py`  
-**行号：** 66
+### 4. yt-dlp 进程在 FFmpeg 失败时泄漏
+
+**文件：** `backend/app/integrations/bilibili/audio.py:62-73`
+
+`subprocess.run(ffmpeg_cmd)` 非超时异常（如 `CalledProcessError`）被通用 `except Exception` 捕获，但 `ytdlp_proc` 进程从未被杀死或回收。yt-dlp 子进程变为孤儿持续运行。
+
+修复：异常处理块中增加 `ytdlp_proc.kill()`。
+
+---
+
+## 高严重性 (HIGH) — 影响功能正确性或数据完整性
+
+### 5. 重试/reanalyze 导致重复数据
+
+**文件：** `backend/app/workers/tasks/analyze_part.py:87,102,117`
+
+`_save_transcript`、`_save_summary`、`_save_chapters` 均追加新记录而不删除旧记录。retry 时已完成的子任务被重新处理，创建重复的 transcript segment、part summary 和 chapter 记录。（`build_chunks` 正确先删后建，但 save 系列函数没有。）
+
+修复：保存前先删除该 part_id 的旧记录。
+
+### 6. `already_analyzed` 忽略当前用户
+
+**文件：** `backend/app/services/video_service.py:49`
 
 ```python
-ytdlp_proc.wait(timeout=5)
+self.db.query(AnalysisTask).filter(AnalysisTask.video_id == video.id).count() > 0
 ```
 
-ffmpeg 成功完成后给 yt-dlp 进程仅 5 秒退出时间。yt-dlp 清理网络连接可能需要更久。实际超时只有 5 秒（不是错误消息中说的"15 分钟"），合法的音频提取被误判为失败。
+查询了所有用户的 AnalysisTask。用户 A 从未分析过的视频会因为用户 B 分析过而显示 `already_analyzed=True`。
 
-### 11. `VideoPreview.tsx` 中 `video.id!` 强制解包可能传 null
+修复：增加 `.filter(AnalysisTask.user_id == ...)` 条件。
 
-**文件：** `web/src/components/VideoPreview.tsx`  
-**行号：** 41
+### 7. Celery dispatch 前已提交数据库 — 任务可能永远卡在 waiting
 
-`video.id!` 使用 TypeScript 非空断言，但运行时 `video.id` 可能是 `null`。这会发送 `"video_id": null` 给后端 API。
+**文件：** `backend/app/services/analysis_service.py:63+68, 186+189, 224+227`
 
-### 12. `TaskProgressPage.tsx` setInterval 泄漏
+`db.commit()` 在 `start_analysis.delay(task.id)` 之前执行。如果 Redis/Celery broker 不可达，`delay()` 抛出异常，但数据库已提交，task 记录 `status="waiting"` 却被永远不被处理。
 
-**文件：** `web/src/pages/TaskProgressPage.tsx`  
-**行号：** 56-71
+修复：将 `commit` 移至 `delay` 之后，或增加 try/rollback。
 
-`handleRetry` 创建新 `setInterval` 前不清除旧 interval。每次重试增加一个轮询定时器。组件卸载时只清除最新的 interval，旧的持续运行导致多倍轮询。修复： `clearInterval(intervalRef.current)` 在 `setInterval` 之前。
+### 8. QA Prompt 缺少 JSON 结构指令
 
-### 13. `HistoryPage.tsx` 删除操作存在竞态条件
+**文件：** `backend/app/services/qa_service.py:17-26`
 
-**文件：** `web/src/pages/HistoryPage.tsx`  
-**行号：** 42
+QA_PROMPT 未指定输出 JSON 格式，但代码调用了 `provider.chat_json()`（强制 `response_format: json_object`）。LLM 可能输出 `{"response": "..."}` 而非 `{"answer": "..."}`，导致用户收到空回复。
+
+修复：Prompt 中明确要求 `{"answer": "..."}` 格式。
+
+### 9. 视频总结生成失败被完全静默吞掉
+
+**文件：** `backend/app/workers/tasks/analyze_part.py:296`
+
+```python
+except Exception:
+    pass  # 视频总结失败不影响任务整体状态
+```
+
+无任何日志记录。生产环境排查全视频总结缺失问题时无法定位根因。
+
+修复：至少添加 `logger.exception("视频总结生成失败")`。
+
+### 10. 前端多处 Effect 缺少清理 — 陈旧响应覆盖新数据
+
+**文件：**
+- `web/src/pages/VideoDetailPage.tsx:12-28`
+- `web/src/pages/TaskProgressPage.tsx:48-54`
+- `web/src/pages/PartAnalysisPage.tsx:15-29`
+- `web/src/pages/QAPage.tsx:15-33`
+
+所有异步 fetch 的 useEffect 都没有 abort controller 或 cleanup flag。快速切换页面/routes 时，先发出的请求可能后返回，用陈旧数据覆盖正确的新数据。
+
+修复：使用 `AbortController` 或 `let cancelled = false` cleanup 模式。
+
+### 11. Token 失效后前端不重定向登录
+
+**文件：** `web/src/api/client.ts:72-83`
+
+当 refresh token 也失效（`refreshAccessToken()` 返回 false）时，API 返回 401，但 `clearTokens()` 未被调用，`AuthGuard` 仍允许通过。用户看到"加载失败"但无合法 token，无法恢复，直到手动刷新页面（M0 修复的 `loadTokens` 会清除问题）。
+
+修复：refresh 失败后调用 `clearTokens()` 并导航到 `/login`。
+
+### 12. QA 消息在错误时被静默清除
+
+**文件：** `web/src/pages/QAPage.tsx:24-28`
 
 ```typescript
-setItems(items.filter((i) => i.id !== videoId));
+.then(r => r.ok ? r.json() : [])
+.then(setMessages)
 ```
 
-使用闭包中的 `items` 而非函数式更新。快速连续删除两个条目时，第二个删除会覆盖第一个删除的效果，被删除的条目重新出现。
+当 `getQAMessages` 返回非 2xx 时，`[]` 传给 `setMessages`，**清空**当前聊天窗口中的消息。切换会话时如果网络出现瞬时故障，已有消息会消失。
 
-### 14. 多处页面错误状态在路由变化时残留
-
-**文件：** `web/src/pages/VideoDetailPage.tsx` (行 12-27), `PartAnalysisPage.tsx` (行 15-28)
-
-`videoId` 或 `partId` 变化时，`setLoading(true)` 被调用但 `setError("")` 没有被调用。前一次请求的错误信息残留显示，即使新请求成功。
+修复：非 OK 时保留当前消息或显示错误。
 
 ---
 
 ## 中严重性 (MEDIUM) — 可能引起异常行为
 
-### 15. `_validate_result` 中 `prev_end` 可能为 None → TypeError
+### 13. LLM `response_format: json_object` 与部分 provider 不兼容
 
-**文件：** `backend/app/workers/tasks/analyze_part.py`  
-**行号：** 399-406
+**文件：** `backend/app/integrations/llm/openai_compatible.py:41`
 
-LLM JSON 输出中若章节的 `end_time` 字段存在但值为 `null`，`ch.get("end_time", st)` 返回 `None`（因为键存在）。下一次迭代 `int < None` → `TypeError`。
+非 OpenAI 的兼容 provider（Ollama、LM Studio 等）不支持 `response_format` 参数，可能返回 400 或静默降级为非 JSON 输出。
 
-### 16. `mask_api_key` 对短 key 暴露过多
+修复：可配置是否启用 `response_format`，或做 provider 特性检测。
 
-**文件：** `backend/app/services/credential_service.py`  
-**行号：** 10-14
+### 14. `_validate_result` 章节时间比较可能 TypeError
 
-8 位 key `"12345678"` → mask 后 `"123****5678"`（显示 7/8 = 87.5%）。8-11 位 key 的脱敏效果很差。
+**文件：** `backend/app/workers/tasks/analyze_part.py:417`
 
-### 17. `openai_compatible.py` 对异常 API 响应结构缺少防御
+如果 LLM 返回字符串时间戳（如 `"start_time": "120"`），`st < prev_end` 比较 `str < int` 在 Python 3 引发 `TypeError`。虽被外层 catch 捕获标记为失败，但数据库中存储的是原始 TypeError 信息不友好。
 
-**文件：** `backend/app/integrations/llm/openai_compatible.py`  
-**行号：** 48
+### 15. `get_part_analysis` 权限检查只对最新子任务
+
+**文件：** `backend/app/services/analysis_service.py:85-96`
+
+子任务查询无条件取最新一条（不按用户过滤）。如果用户 B 在用户 A 之后分析了同一分 P，用户 A 再请求时看到的是用户 B 的子任务，被 403 拒绝 —— 尽管用户 A 自己也分析过。
+
+修复：按当前用户的任务过滤子任务，或允许用户访问自己拥有的任意子任务。
+
+### 16. `update_*` 函数跳过 None 值 — 无法清空字段
+
+**文件：** `backend/app/repositories/credential_repository.py:49-50` + `video_repository.py:24-25`
+
+`if value is not None: setattr(...)` 模式使得 API 调用者发送 `null` 意图清空某个字段时被默默忽略。
+
+### 17. `update_video` 不刷新已有分 P 元数据
+
+**文件：** `backend/app/services/video_service.py:82-83`
+
+视频重新解析时，已有的分 P（cid 已存在）的 `title`、`duration`、`source_url` 不会被更新。如果 UP 主修改了分 P 标题或时长，数据库保留过时信息。
+
+### 18. `_get_qa_provider` 从 Celery worker 导入私有函数
+
+**文件：** `backend/app/services/qa_service.py:89`
 
 ```python
-content = data["choices"][0]["message"]["content"]
+from app.workers.tasks.analyze_part import _get_llm_provider
 ```
 
-如果 API 返回 `{"choices": []}` 或 `{"choices": [{"message": null}]}`，直接 `KeyError`/`IndexError`。应在访问前检查结构完整性。
+Service 层导入 Worker 层的私有函数，架构边界被打破。重构 Worker 模块可能无声地破坏 QA 服务。
 
-### 18. ASR 临时目录泄漏
+### 19. 多处缺少加载/错误反馈
 
-**文件：** `backend/app/integrations/asr/openai_asr.py` (行 93), `faster_whisper_asr.py` (行 97)
+**文件：**
+- `QAPage.tsx:35-42` — 创建会话无 loading 状态，可重复点击
+- `QAPage.tsx:54-56` — 提问失败静默忽略
+- `ExportMenu.tsx:17` — 下载错误无用户反馈
+- `HistoryPage.tsx:45-47` — 删除失败无反馈
 
-`tempfile.mkdtemp()` 创建的目录在切片文件删除后从未被删除，每次大文件 ASR 请求泄漏一个空目录。
+### 20. `SubtitleSegment` 在循环内导入
 
-### 19. Video 和 Parts 创建非原子性
+**文件：** `backend/app/workers/tasks/analyze_part.py:211`
 
-**文件：** `backend/app/services/video_service.py`  
-**行号：** 53, 74
+每次循环迭代重新执行 import 语句（虽然 Python 有缓存但仍有开销）。应移至文件顶部。
 
-`create_video` 单独 commit，然后每个 `create_video_part` 独立 commit。部分 parts 创建失败时，video 记录和已创建的 parts 已持久化，数据库处于不一致状态。
+### 21. Docker Compose Web 构建流程不完整
 
-### 20. Repository 层函数各自独立 commit
+**文件：** `docker-compose.yml:8` + `web/Dockerfile`
 
-**文件：** 所有 `backend/app/repositories/*.py`
+docker-compose 直接将 `./web/dist` 挂载到 nginx，但未定义 web 构建服务。`web/Dockerfile` 独立存在但不被 compose 引用。`docker compose up` 前必须手动 `cd web && npm run build`。
 
-每个 `create_*`、`update_*`、`delete_*` 都自行 `db.commit()`。Service 层无法将多个操作纳入同一事务。标准模式是 commit 在 service 层完成。
+### 22. `prompt/summary_chapters_v1.txt` 缺少时间戳类型约束
 
-### 21. `get_video_history` 中 `status` 参数死代码
-
-**文件：** `backend/app/repositories/video_repository.py`  
-**行号：** 47-72
-
-函数签名接受 `status: str | None = None` 但从不在查询中应用。`count_video_history` 甚至不接受该参数。
-
-### 22. `force_reanalyze` 保存但从未被检查
-
-**文件：** `backend/app/services/analysis_service.py`  
-**行号：** 42
-
-标记被存储但创建新任务前不检查是否已有分析结果。即使 `force_reanalyze=False` 也能创建冗余任务。
-
-### 23. LLM Provider 和 ASR Provider 的空 prompt 无声失败
-
-**文件：** `backend/app/workers/tasks/analyze_part.py`  
-**行号：** 167
-
-如果 `prompts/summary_chapters_v1.txt` 缺失或为空，LLM 以 `system_prompt=""` 运行，输出不可预测，任务失败但错误消息不提及 prompt 丢失。
-
-### 24. 保存摘要时 provider/model 元数据可能错误标记为 "unknown"
-
-**文件：** `backend/app/workers/tasks/analyze_part.py`  
-**行号：** 266-268
-
-`_get_llm_provider` 可回退到非默认凭据，但 `_get_cred` 只找默认凭据。使用非默认凭据时，metadata 标记为 `provider="unknown"`。
-
-### 25. 前端认证路由无守卫
-
-**文件：** `web/src/routes/index.tsx`  
-**行号：** 10-18
-
-受保护页面（`/history`, `/videos/new`, `/tasks/:taskId` 等）不经认证直接可访问。如果 token 丢失（问题 2），用户看到错误而非被重定向到登录页。
-
-### 26. `@tanstack/react-query` 未使用 — 死代码
-
-**文件：** `web/src/main.tsx`  
-**行号：** 4, 8, 12
-
-`QueryClientProvider` 和 `QueryClient` 被导入初始化但整个项目没有使用 React Query hooks。增加了不必要的 bundle 体积。
-
-### 27. API client 并发 401 刷新竞态条件
-
-**文件：** `web/src/api/client.ts`  
-**行号：** 65-71
-
-两个请求同时得到 401 时，并发调用 `refreshAccessToken()`。第一个成功，第二个使用已被废止的旧 refresh token 导致失败。
-
-### 28. 缺少 `.dockerignore` 文件
-
-**文件：** `backend/` 和 `web/` 目录
-
-`backend/Dockerfile` 的 `COPY . .` 会复制 `.venv/`（数百 MB）、`__pycache__/`、潜在的 `.env` 文件到镜像中。`web/Dockerfile` 类似问题复制 `node_modules/`。
-
-### 29. Celery Worker 异常处理中二次数据库查询可能失败
-
-**文件：** `backend/app/workers/tasks/analyze_part.py`  
-**行号：** 304-312
-
-外层异常处理在异常上下文中执行新的数据库查询更新 task 状态。如果数据库连接已断开，此查询同样失败，阻止 `self.retry()` 执行并吞掉原始错误。
-
-### 30. `pyproject.toml` 与 `requirements.txt` 无同步机制
-
-**文件：** `backend/pyproject.toml` + `backend/requirements.txt`
-
-Dockerfile 使用 `requirements.txt`，但权威依赖列表在 `pyproject.toml`。两文件可能不同步，导致 Docker 镜像安装了过时/错误的依赖版本。
-
-### 31. Redis 无 healthcheck
-
-**文件：** `docker-compose.yml`  
-**行号：** 58
-
-`redis` 服务没有 healthcheck，`api` 和 `worker` 使用 `condition: service_started`。在冷启动竞态中，Celery broker 可能在 Redis 真正接受连接前尝试连接。
-
-### 32. FTP 读取环境变量绕过 pydantic-settings
-
-**文件：** `backend/app/integrations/bilibili/audio.py`  
-**行号：** 93
-
-`os.getenv("TEMP_FILE_TTL_HOURS", "24")` 直接读取 OS 环境变量，绕过了 `config.py` 的 `Settings` 对象。如果通过 `.env` 文件配置，两者可能不一致。
+Prompt 未明确要求 `start_time` 和 `end_time` 必须是数字而非字符串。部分 LLM 会输出字符串时间戳，导致校验失败。
 
 ---
 
 ## 低严重性 (LOW) — 代码质量问题
 
-### 33. 多个 ORM 模型缺少时间戳列
+### 23. `Video.bvid` 有 index 但无 unique 约束
 
-**文件：** `backend/app/models/task.py`, `transcript.py`, `summary.py`
+**文件：** `backend/app/models/video.py:17`
 
-- `PartAnalysisTask` 有 `started_at`/`finished_at` 但无 `updated_at`
-- `TranscriptSegment`、`TranscriptChunk` 无任何时间戳
-- `Chapter` 无时间戳
+同一 BVID 可能被重复插入。`get_video_by_bvid` 用 `.first()` 返回任意一条。
 
-### 34. repository 的 `update_*` 函数跳过 None 值
+### 24. `get_db` 缺少 `db.rollback()`
 
-**文件：** `backend/app/repositories/credential_repository.py` (行 50), `video_repository.py` (行 24)
+**文件：** `backend/app/core/database.py:11-17`
 
-`if value is not None: setattr(...)` → 调用者无法将字段设为 NULL。与 PATCH 语义冲突。
+路由抛出异常时 session 直接 close 无 rollback。psycopg2 的失败事务可能污染连接池。
 
-### 35. `unset_default_for_user` 竞态条件
+### 25. ASR Provider 两个实现中 `_split_audio` 和 `_get_audio_duration` 完全重复
 
-**文件：** `backend/app/services/credential_service.py`  
-**行号：** 41-56
+**文件：** `openai_asr.py` vs `faster_whisper_asr.py`
 
-两个并行请求可能同时将多个凭据设为默认。缺少 `(user_id, is_default)` 唯一约束或咨询锁。
+相同逻辑在两处维护，修改一处需同步另一处。建议提取到 base 或公共工具模块。
 
-### 36. `schemas/auth.py` 未使用的 `EmailStr` 导入
+### 26. `metadata.py` 中 `pubdate` 若为字符串 → TypeError
 
-**文件：** `backend/app/schemas/auth.py`  
-**行号：** 2
+**文件：** `backend/app/integrations/bilibili/metadata.py:74`
 
-`EmailStr` 被导入但 `UserRegister.email` 类型为 `str | None`。
+`datetime.fromtimestamp(pubdate)` 不接收字符串。应增加 `isinstance(pubdate, (int, float))` 校验。
 
-### 37. `api/auth.py` 中未使用的 `user` 变量
+### 27. `resolver.py` 短链展开失败无日志
 
-**文件：** `backend/app/api/auth.py`  
-**行号：** 16, 23
+**文件：** `backend/app/integrations/bilibili/resolver.py:43-53`
 
-`register` 和 `login` 返回 `(user, access, refresh)`，但 `user` 未被使用（Linter 警告）。
+`_expand_short_link` 捕获所有异常返回 None，不记录原因。b23.tv 链接变化时难以排查。
 
-### 38. Pydantic v1 弃用的 `Config` 内部类
+### 28. 前端 HistoryPage 分页无上限
 
-**文件：** `backend/app/core/config.py`  
-**行号：** 37-38
+**文件：** `web/src/pages/HistoryPage.tsx:88-91`
 
-应使用 Pydantic v2 的 `model_config = SettingsConfigDict(...)`。
+`total` 和 `page_size` 被 API 返回但未使用。"下一页"按钮永远可点击（即使已在最后一页）。
 
-### 39. `resolver.py` 短链展开异常静默吞咽
+### 29. Nginx 缺少 gzip 压缩和 API 健康检查
 
-**文件：** `backend/app/integrations/bilibili/resolver.py`  
-**行号：** 43-53
+**文件：** `docker/nginx/default.conf` + `docker-compose.yml:13`
 
-`_expand_short_link` 捕获所有异常返回 `None`，不记录日志。b23.tv 链接格式变化时难以排查。
+静态资源无 gzip（JS bundle ~200KB 未压缩传输）；API 无 healthcheck（nginx 依赖只检查启动不检查健康）。
 
-### 40. `metadata.py` 中 `if pubdate:` 对 Unix timestamp 0 为假
+### 30. 硬编码默认 SECRET_KEY
 
-**文件：** `backend/app/integrations/bilibili/metadata.py`  
-**行号：** 72
+**文件：** `backend/app/core/config.py:10`
 
-`if pubdate:` 在时间戳为 0 (1970-01-01) 时为 False。应使用 `if pubdate is not None:`。
-
-### 41. `faster_whisper_asr.py` 中 `confidence = avg_logprob` 语义不对
-
-**文件：** `backend/app/integrations/asr/faster_whisper_asr.py`  
-**行号：** 82
-
-`avg_logprob` 为负数（如 -0.3），而 `TranscriptSegment.confidence` 字段预期 0-1 范围。
-
-### 42. 前端 `formatTime` 不处理负数或 NaN
-
-**文件：** `web/src/types/analysis.ts`  
-**行号：** 55-59
-
-输入负数返回 `"-1:XX"`，NaN 返回 `"NaN:NaN"`。缺少运行时校验。
-
-### 43. `ChapterList.tsx` 和 `TranscriptView.tsx` 使用 index 作为 key
-
-**文件：** `web/src/components/ChapterList.tsx` (行 17), `TranscriptView.tsx` (行 29)
-
-动态列表不应使用数组 index 作为 React key。
-
-### 44. `TranscriptView.tsx` 多个段落可能竞用同一 ref
-
-**文件：** `web/src/components/TranscriptView.tsx`  
-**行号：** 26-30
-
-如果 `highlightTime` 同时落入多个重叠时间段，多个 `<div>` 竞争同一个 ref。React 只赋值给最后一个匹配元素。
-
-### 45. Nginx 缺少安全响应头和缓存头
-
-**文件：** `docker/nginx/default.conf`
-
-- 无 `X-Content-Type-Options`、`X-Frame-Options`、`CSP`
-- 静态资源无 `Cache-Control`（SPA index.html 应 `no-cache`，带 hash 的 JS/CSS 应长缓存）
-
-### 46. web/Dockerfile 只有 build stage，无 runtime 镜像
-
-**文件：** `web/Dockerfile`
-
-Dockerfile 仅产出 `/app/dist`。Docker Compose 依赖主机上已存在 `web/dist/` 目录。没有自动化构建依赖。
-
-### 47. docker-compose 中硬编码数据库密码
-
-**文件：** `docker-compose.yml`  
-**行号：** 48-50
-
-`POSTGRES_PASSWORD: bilihelper` 硬编码而非引用环境变量。
+`APP_SECRET_KEY: str = "change-me-in-production"` — 不覆盖环境变量可直接伪造 JWT token。
 
 ---
 
@@ -373,21 +261,20 @@ Dockerfile 仅产出 `/app/dist`。Docker Compose 依赖主机上已存在 `web/
 | 严重度 | 数量 |
 |--------|------|
 | CRITICAL | 4 |
-| HIGH | 10 |
-| MEDIUM | 18 |
-| LOW | 15 |
-| **总计** | **47** |
+| HIGH | 8 |
+| MEDIUM | 10 |
+| LOW | 8 |
+| **总计** | **30** |
 
 ---
 
-## 严重问题优先修复顺序
+## 优先修复顺序
 
-1. **Worker `total` 未定义** (#1) — 分析管道完全不可用
-2. **`loadTokens()` 未调用** (#2) — 前端每次刷新丢登录态
-3. **Encryption key 无效** (#3) — API Key 加解密 crash
-4. **Docker 缺少 `.env`** (#4) — 无法启动
-5. **JWT 验证漏洞** (#5, #6) — 安全边界问题
-6. **权限检查缺失** (#7, #8) — 数据越权访问
-7. **B站 API 解析崩溃** (#9) — 特定视频完全无法处理
-8. **前端 setInterval 泄漏** (#12) — 逐步耗尽资源
-9. **前端非空断言** (#11) — 潜在运行时错误
+1. **ASR `output_dir` NameError** (#1) — 大音频文件 ASR 直接崩溃
+2. **导出端点无认证** (#2) — 全量数据暴露
+3. **QA 引用查询列错误** (#3) — 引用功能完全不工作
+4. **yt-dlp 进程泄漏** (#4) — 长时间运行导致资源耗尽
+5. **重复数据** (#5) — 重试造成数据库膨胀
+6. **`already_analyzed` 跨用户** (#6) — 用户界面信息误导
+7. **Celery dispatch 时序** (#7) — 任务卡在 waiting 状态
+8. **前端陈旧响应竞争** (#10) — 快速操作显示错误数据

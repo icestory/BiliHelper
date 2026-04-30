@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/videos", tags=["视频"])
 @router.post("/parse", response_model=VideoParseResponse)
 def parse_video(body: VideoParseRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """解析 B 站链接，返回视频信息和分 P 列表"""
-    return VideoService(db).parse(body.url)
+    return VideoService(db).parse(body.url, current_user.id)
 
 
 @router.get("/history", response_model=VideoHistoryResponse)

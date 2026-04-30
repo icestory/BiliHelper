@@ -2,8 +2,11 @@
 视频分析 Celery 异步任务
 流程：获取字幕 → 保存 transcript → LLM 总结/章节 → 保存结果
 """
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from app.workers.celery_app import celery_app
 from app.core.database import SessionLocal
@@ -85,7 +88,8 @@ def _chunk_transcript(segments: list, max_chars: int = 8000) -> list[list]:
 
 
 def _save_transcript(db, part_id: int, segments: list, source: str) -> None:
-    """保存字幕/ASR 段落到数据库"""
+    """保存字幕/ASR 段落到数据库（先删旧数据，防止重试重复）"""
+    db.query(TranscriptSegment).filter(TranscriptSegment.video_part_id == part_id).delete()
     for i, seg in enumerate(segments):
         ts = TranscriptSegment(
             video_part_id=part_id,
@@ -100,7 +104,8 @@ def _save_transcript(db, part_id: int, segments: list, source: str) -> None:
 
 
 def _save_summary(db, part_id: int, data: dict, provider: str, model: str, prompt_version: str) -> None:
-    """保存总结到数据库"""
+    """保存总结到数据库（先删旧数据，防止重试重复）"""
+    db.query(PartSummary).filter(PartSummary.video_part_id == part_id).delete()
     ps = PartSummary(
         video_part_id=part_id,
         summary=data.get("summary", ""),
@@ -115,7 +120,8 @@ def _save_summary(db, part_id: int, data: dict, provider: str, model: str, promp
 
 
 def _save_chapters(db, part_id: int, chapters: list[dict]) -> None:
-    """保存章节到数据库"""
+    """保存章节到数据库（先删旧数据，防止重试重复）"""
+    db.query(Chapter).filter(Chapter.video_part_id == part_id).delete()
     for i, ch in enumerate(chapters):
         c = Chapter(
             video_part_id=part_id,
@@ -294,7 +300,7 @@ def start_analysis(self, task_id: int):
             try:
                 _generate_video_summary(db, task.video_id, task.user_id)
             except Exception:
-                pass  # 视频总结失败不影响任务整体状态
+                logger.exception("全视频总结生成失败 video_id=%s", task.video_id)
 
         # 更新总任务状态
         if completed == total:

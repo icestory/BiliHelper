@@ -18,7 +18,7 @@ class VideoService:
     def __init__(self, db: Session):
         self.db = db
 
-    def parse(self, url: str) -> VideoParseResponse:
+    def parse(self, url: str, user_id: int | None = None) -> VideoParseResponse:
         # 1. 解析链接
         ref = resolve(url)
         if not ref.is_valid:
@@ -46,9 +46,10 @@ class VideoService:
             )
             # 检查是否有分析任务
             from app.models.task import AnalysisTask
-            already_analyzed = self.db.query(AnalysisTask).filter(
-                AnalysisTask.video_id == video.id
-            ).count() > 0
+            query = self.db.query(AnalysisTask).filter(AnalysisTask.video_id == video.id)
+            if user_id is not None:
+                query = query.filter(AnalysisTask.user_id == user_id)
+            already_analyzed = query.count() > 0
         else:
             video = video_repository.create_video(self.db,
                 bvid=info.video.bvid,

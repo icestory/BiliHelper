@@ -11,10 +11,12 @@ export default function VideoDetailPage() {
 
   useEffect(() => {
     if (!videoId) return;
+    let cancelled = false;
     setLoading(true);
     setError("");
     getVideoDetail(Number(videoId))
       .then(async (res) => {
+        if (cancelled) return;
         if (!res.ok) {
           const data = await res.json();
           setError(data.detail || "加载失败");
@@ -23,8 +25,9 @@ export default function VideoDetailPage() {
         const data = await res.json();
         setVideo(data);
       })
-      .catch(() => setError("网络错误"))
-      .finally(() => setLoading(false));
+      .catch(() => { if (!cancelled) setError("网络错误"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [videoId]);
 
   if (loading) return <p>加载中...</p>;

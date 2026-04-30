@@ -14,9 +14,11 @@ export default function PartAnalysisPage() {
 
   useEffect(() => {
     if (!partId) return;
+    let cancelled = false;
     setError("");
     getPartAnalysis(Number(partId))
       .then(async (res) => {
+        if (cancelled) return;
         if (!res.ok) {
           const detail = await res.json();
           setError(detail.detail || "加载失败");
@@ -24,8 +26,9 @@ export default function PartAnalysisPage() {
         }
         setData(await res.json());
       })
-      .catch(() => setError("网络错误"))
-      .finally(() => setLoading(false));
+      .catch(() => { if (!cancelled) setError("网络错误"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [partId]);
 
   if (loading) return <p>加载中...</p>;

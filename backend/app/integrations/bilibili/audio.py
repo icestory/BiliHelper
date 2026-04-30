@@ -70,6 +70,10 @@ def extract_audio(bvid: str, cid: int, page_no: int = 1) -> str:
         ytdlp_proc.wait(timeout=5)
         raise RuntimeError("音频提取超时（超过 15 分钟）")
     except Exception as e:
+        ytdlp_proc.kill()
+        ytdlp_proc.wait(timeout=5)
+        raise RuntimeError(f"音频提取失败: {str(e)}")
+    except Exception as e:
         raise RuntimeError(f"音频提取失败: {str(e)}")
 
     # 验证文件存在且非空

@@ -53,7 +53,7 @@ class FasterWhisperProvider(ASRProvider):
             return self._transcribe_single(audio_path)
 
         # 切片处理
-        slices = self._split_audio(audio_path, duration, _MAX_SEGMENT_DURATION)
+        slices, output_dir = self._split_audio(audio_path, duration, _MAX_SEGMENT_DURATION)
         all_segments = []
         time_offset = 0.0
 
@@ -94,7 +94,8 @@ class FasterWhisperProvider(ASRProvider):
 
         return segments
 
-    def _split_audio(self, audio_path: str, total_duration: float, max_duration: float) -> list[str]:
+    def _split_audio(self, audio_path: str, total_duration: float, max_duration: float) -> tuple[list[str], str]:
+        """返回 (切片路径列表, 临时目录)"""
         num_slices = max(1, math.ceil(total_duration / max_duration))
         slice_duration = total_duration / num_slices
 
@@ -114,7 +115,7 @@ class FasterWhisperProvider(ASRProvider):
             ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             slices.append(output_path)
 
-        return slices
+        return slices, output_dir
 
     def _get_audio_duration(self, audio_path: str) -> float:
         import json

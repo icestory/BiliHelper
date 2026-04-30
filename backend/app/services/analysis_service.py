@@ -63,9 +63,15 @@ class AnalysisService:
         self.db.commit()
         self.db.refresh(task)
 
-        # 异步投递 Celery 任务
+        # 异步投递 Celery 任务（失败时回滚数据库状态）
         from app.workers.tasks.analyze_part import start_analysis
-        start_analysis.delay(task.id)
+        try:
+            start_analysis.delay(task.id)
+        except Exception:
+            task.status = "failed"
+            task.error_message = "任务队列不可用，请稍后重试"
+            self.db.commit()
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="任务队列不可用")
 
         return self._to_response(task)
 
@@ -185,9 +191,15 @@ class AnalysisService:
         task.finished_at = None
         self.db.commit()
 
-        # 重新投递
+        # 重新投递（失败时标记任务失败）
         from app.workers.tasks.analyze_part import start_analysis
-        start_analysis.delay(task.id)
+        try:
+            start_analysis.delay(task.id)
+        except Exception:
+            task.status = "failed"
+            task.error_message = "任务队列不可用，请稍后重试"
+            self.db.commit()
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="任务队列不可用")
 
         return self._to_response(task)
 
@@ -224,7 +236,13 @@ class AnalysisService:
         self.db.commit()
 
         from app.workers.tasks.analyze_part import start_analysis
-        start_analysis.delay(task.id)
+        try:
+            start_analysis.delay(task.id)
+        except Exception:
+            task.status = "failed"
+            task.error_message = "任务队列不可用，请稍后重试"
+            self.db.commit()
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="任务队列不可用")
 
         return PartAnalysisDetail(
             id=sub.id,

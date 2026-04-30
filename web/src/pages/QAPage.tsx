@@ -22,10 +22,12 @@ export default function QAPage() {
 
   useEffect(() => {
     if (!activeSessionId) return;
+    let cancelled = false;
     getQAMessages(activeSessionId)
-      .then(r => r.ok ? r.json() : [])
-      .then(setMessages)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (!cancelled && data !== null) setMessages(data); })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [activeSessionId]);
 
   useEffect(() => {

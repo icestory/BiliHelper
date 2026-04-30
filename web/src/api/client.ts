@@ -77,6 +77,9 @@ export async function apiFetch(
     if (ok) {
       headers["Authorization"] = `Bearer ${accessToken}`;
       res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+    } else {
+      // refresh 失败，清除 token 让 AuthGuard 重定向到登录
+      clearTokens();
     }
   }
 

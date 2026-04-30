@@ -28,7 +28,7 @@ class OpenAIASRProvider(ASRProvider):
             return self._transcribe_single(audio_path)
 
         # 大文件切片处理
-        slices = self._split_audio(audio_path, _MAX_FILE_SIZE * 0.9)
+        slices, output_dir = self._split_audio(audio_path, _MAX_FILE_SIZE * 0.9)
         all_segments = []
         time_offset = 0.0
 
@@ -83,11 +83,11 @@ class OpenAIASRProvider(ASRProvider):
 
         return segments
 
-    def _split_audio(self, audio_path: str, max_size: int) -> list[str]:
-        """按文件大小将音频切片（使用 FFmpeg segment）"""
+    def _split_audio(self, audio_path: str, max_size: int) -> tuple[list[str], str]:
+        """按文件大小将音频切片（使用 FFmpeg segment），返回 (切片路径列表, 临时目录)"""
         total_duration = self._get_audio_duration(audio_path)
         if total_duration <= 0:
-            return [audio_path]
+            return [audio_path], tempfile.mkdtemp(prefix="asr_slices_")
 
         file_size = os.path.getsize(audio_path)
         # 估算切片数（按文件大小比例）
@@ -110,7 +110,7 @@ class OpenAIASRProvider(ASRProvider):
             ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             slices.append(output_path)
 
-        return slices
+        return slices, output_dir
 
     def _get_audio_duration(self, audio_path: str) -> float:
         """获取音频时长（秒）"""
