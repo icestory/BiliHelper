@@ -226,8 +226,10 @@ def start_analysis(self, task_id: int):
                         if audio_path:
                             cleanup_audio(audio_path)
 
-                # Step 2: 保存 transcript
+                # Step 2: 保存 transcript + 构建检索 chunk
                 _save_transcript(db, sub.video_part_id, segments, source)
+                from app.services.transcript_service import build_chunks
+                build_chunks(db, sub.video_part_id)
                 sub.transcript_source = source
                 sub.progress = 40
                 db.commit()

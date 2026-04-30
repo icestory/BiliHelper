@@ -166,29 +166,29 @@
 
 ### 后端
 
-- [ ] Transcript chunk 聚合（按 token 数切分，存入 `transcript_chunks`）
-- [ ] 问答检索（MVP: PostgreSQL 全文检索 / 关键词匹配）
-- [ ] QA Prompt 构造（总结 + 章节 + 相关 chunks + 引用要求）
-- [ ] `POST /api/videos/{video_id}/qa-sessions` 创建问答会话
-- [ ] `POST /api/qa-sessions/{session_id}/messages` 发送问题
-- [ ] `GET /api/qa-sessions/{session_id}/messages` 获取历史消息
-- [ ] Markdown 导出模板（全视频 / 单 P）
-- [ ] `GET /api/exports/videos/{video_id}.md` 导出接口
-- [ ] `GET /api/exports/parts/{part_id}.md` 导出接口
+- [x] Transcript chunk 聚合（按 token 数切分，存入 `transcript_chunks`）
+- [x] 问答检索（MVP: PostgreSQL 全文检索 / 关键词匹配）
+- [x] QA Prompt 构造（总结 + 章节 + 相关 chunks + 引用要求）
+- [x] `POST /api/videos/{video_id}/qa-sessions` 创建问答会话
+- [x] `POST /api/qa-sessions/{session_id}/messages` 发送问题
+- [x] `GET /api/qa-sessions/{session_id}/messages` 获取历史消息
+- [x] Markdown 导出模板（全视频 / 单 P）
+- [x] `GET /api/exports/videos/{video_id}.md` 导出接口
+- [x] `GET /api/exports/parts/{part_id}.md` 导出接口
 
 ### Web
 
-- [ ] QAView 页面 — 聊天式问答界面
-- [ ] 引用时间点点击跳转（定位到 transcript + 打开 B 站链接）
-- [ ] ExportMenu 组件 — 导出选项（含/不含文案、章节、问答）
-- [ ] Markdown 文件下载
+- [x] QAView 页面 — 聊天式问答界面
+- [x] 引用时间点点击跳转（定位到 transcript + 打开 B 站链接）
+- [x] ExportMenu 组件 — 导出选项（含/不含文案、章节、问答）
+- [x] Markdown 文件下载
 
 ### 测试
 
-- [ ] Transcript chunk 切分单元测试
-- [ ] 关键词检索测试
-- [ ] Markdown 模板渲染测试
-- [ ] 问答引用格式测试
+- [x] Transcript chunk 切分单元测试
+- [x] 关键词检索测试
+- [x] Markdown 模板渲染测试
+- [x] 问答引用格式测试
 
 ---
 

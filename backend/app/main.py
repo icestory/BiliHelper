@@ -6,6 +6,8 @@ from app.api.auth import router as auth_router
 from app.api.llm_configs import router as llm_configs_router
 from app.api.videos import router as videos_router
 from app.api.analysis_tasks import router as analysis_router
+from app.api.qa import router as qa_router
+from app.api.exports import router as exports_router
 
 app = FastAPI(title="BiliHelper API", version="0.1.0")
 
@@ -21,6 +23,8 @@ app.include_router(auth_router)
 app.include_router(llm_configs_router)
 app.include_router(videos_router)
 app.include_router(analysis_router)
+app.include_router(qa_router)
+app.include_router(exports_router)
 
 
 @app.get("/api/health")
