@@ -2,7 +2,6 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt
 
-from app.core.config import settings
 from app.core.security import decode_token
 from app.core.database import get_db
 from app.repositories.user_repository import get_user_by_id
@@ -23,7 +22,19 @@ def get_current_user(
     except jwt.JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token 无效")
 
-    user_id = int(payload["sub"])
+    # 拒绝 refresh token 作为 access token 使用
+    if payload.get("type") == "refresh":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请使用 access token，非 refresh token")
+
+    # 安全获取 sub claim，避免 KeyError/ValueError → 500
+    sub = payload.get("sub")
+    if sub is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token 无效：缺少 sub")
+    try:
+        user_id = int(sub)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token 无效：sub 格式错误")
+
     user = get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")

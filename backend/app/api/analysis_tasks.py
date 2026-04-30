@@ -58,4 +58,4 @@ def get_part_analysis(
     db: Session = Depends(get_db),
 ):
     """获取单个分 P 的分析详情（文案、总结、章节）"""
-    return AnalysisService(db).get_part_analysis(part_id)
+    return AnalysisService(db).get_part_analysis(part_id, current_user.id)

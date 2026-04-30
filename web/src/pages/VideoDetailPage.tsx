@@ -12,6 +12,7 @@ export default function VideoDetailPage() {
   useEffect(() => {
     if (!videoId) return;
     setLoading(true);
+    setError("");
     getVideoDetail(Number(videoId))
       .then(async (res) => {
         if (!res.ok) {

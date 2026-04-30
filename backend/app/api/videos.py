@@ -47,7 +47,7 @@ def delete_video_history(
 
 
 @router.get("/{video_id}/summary", response_model=VideoSummaryResponse)
-def get_video_summary(video_id: int, db: Session = Depends(get_db)):
+def get_video_summary(video_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """获取视频的全视频总览总结"""
     vs = db.query(VideoSummary).filter(VideoSummary.video_id == video_id).order_by(VideoSummary.id.desc()).first()
     if not vs:

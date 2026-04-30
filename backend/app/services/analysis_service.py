@@ -77,7 +77,7 @@ class AnalysisService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问此任务")
         return self._to_response(task)
 
-    def get_part_analysis(self, part_id: int) -> PartAnalysisDetail:
+    def get_part_analysis(self, part_id: int, user_id: int | None = None) -> PartAnalysisDetail:
         from app.models.transcript import TranscriptSegment
         from app.models.summary import PartSummary, Chapter
 
@@ -88,6 +88,12 @@ class AnalysisService:
             .order_by(PartAnalysisTask.id.desc())
             .first()
         )
+
+        # 权限检查：验证用户是否拥有该分析数据
+        if user_id is not None and sub is not None:
+            task = self.db.query(AnalysisTask).filter(AnalysisTask.id == sub.analysis_task_id).first()
+            if task and task.user_id != user_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问此分析数据")
 
         part = video_repository.get_part_by_id(self.db, part_id)
 

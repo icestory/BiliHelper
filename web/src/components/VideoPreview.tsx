@@ -38,7 +38,11 @@ export default function VideoPreview({ data }: Props) {
     setError("");
 
     try {
-      const res = await createAnalysisTask(video.id!, Array.from(selectedPartIds));
+      if (video.id == null) {
+        setError("视频信息未完整获取，请重新解析");
+        return;
+      }
+      const res = await createAnalysisTask(video.id, Array.from(selectedPartIds));
       if (!res.ok) {
         const d = await res.json();
         setError(d.detail || "创建任务失败");

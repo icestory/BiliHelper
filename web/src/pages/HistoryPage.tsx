@@ -37,9 +37,13 @@ export default function HistoryPage() {
 
   const handleDelete = async (videoId: number) => {
     if (!confirm("确定删除该视频的分析记录？")) return;
-    const res = await deleteVideoHistory(videoId);
-    if (res.ok) {
-      setItems(items.filter((i) => i.id !== videoId));
+    try {
+      const res = await deleteVideoHistory(videoId);
+      if (res.ok) {
+        setItems(prev => prev.filter((i) => i.id !== videoId));
+      }
+    } catch {
+      // 删除失败静默处理
     }
   };
 

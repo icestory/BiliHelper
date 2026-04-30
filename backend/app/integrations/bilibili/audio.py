@@ -63,9 +63,11 @@ def extract_audio(bvid: str, cid: int, page_no: int = 1) -> str:
             ytdlp_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
         )
         subprocess.run(ffmpeg_cmd, stdin=ytdlp_proc.stdout, check=True, timeout=900)
-        ytdlp_proc.wait(timeout=5)
+        # 等待 yt-dlp 进程退出，允许 60 秒清理
+        ytdlp_proc.wait(timeout=60)
     except subprocess.TimeoutExpired:
         ytdlp_proc.kill()
+        ytdlp_proc.wait(timeout=5)
         raise RuntimeError("音频提取超时（超过 15 分钟）")
     except Exception as e:
         raise RuntimeError(f"音频提取失败: {str(e)}")

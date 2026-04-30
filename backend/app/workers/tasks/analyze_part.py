@@ -148,6 +148,7 @@ def start_analysis(self, task_id: int):
         subs = db.query(PartAnalysisTask).filter(
             PartAnalysisTask.analysis_task_id == task_id
         ).all()
+        total = len(subs)
 
         # 获取 LLM provider
         try:

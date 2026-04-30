@@ -41,8 +41,14 @@ def verify_password(plain: str, hashed: str) -> bool:
 def get_fernet() -> Fernet:
     key = settings.CREDENTIAL_ENCRYPTION_KEY
     if not key:
-        raise RuntimeError("CREDENTIAL_ENCRYPTION_KEY 未配置")
-    return Fernet(key.encode() if isinstance(key, str) else key)
+        raise RuntimeError("CREDENTIAL_ENCRYPTION_KEY 未配置，请生成: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'")
+    try:
+        return Fernet(key.encode() if isinstance(key, str) else key)
+    except Exception:
+        raise RuntimeError(
+            "CREDENTIAL_ENCRYPTION_KEY 无效，不是合法的 Fernet key。"
+            "请生成: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+        )
 
 
 def encrypt_api_key(plain: str) -> str:

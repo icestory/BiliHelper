@@ -60,7 +60,9 @@ export default function TaskProgressPage() {
       const res = await retryAnalysisTask(Number(taskId));
       if (res.ok) {
         setTask(await res.json());
-        // 重新开始轮询
+        setError("");
+        // 清除旧轮询再创建新的，避免泄漏
+        if (intervalRef.current) clearInterval(intervalRef.current);
         intervalRef.current = setInterval(fetchTask, 3000);
       }
     } catch {

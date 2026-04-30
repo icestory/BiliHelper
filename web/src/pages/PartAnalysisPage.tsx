@@ -14,6 +14,7 @@ export default function PartAnalysisPage() {
 
   useEffect(() => {
     if (!partId) return;
+    setError("");
     getPartAnalysis(Number(partId))
       .then(async (res) => {
         if (!res.ok) {
