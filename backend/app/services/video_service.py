@@ -108,7 +108,7 @@ class VideoService:
                 cover_url=video.cover_url,
                 duration=video.duration,
                 description=video.description,
-                published_at=video.published_at,
+                published_at=video.published_at.isoformat() if video.published_at else None,
                 part_count=video.part_count,
                 source_url=video.source_url,
             ),

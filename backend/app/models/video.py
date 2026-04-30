@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Integer, DateTime, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Integer, BigInteger, DateTime, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -15,10 +15,10 @@ class Video(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     bvid: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    aid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    aid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     owner_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    owner_mid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    owner_mid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     cover_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     source_url: Mapped[str] = mapped_column(String(1024), nullable=False)
     duration: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 秒
@@ -39,7 +39,7 @@ class VideoPart(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     video_id: Mapped[int] = mapped_column(ForeignKey("videos.id"), nullable=False, index=True)
     page_no: Mapped[int] = mapped_column(Integer, nullable=False)  # P 序号，从 1 开始
-    cid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     duration: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 秒
     source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
