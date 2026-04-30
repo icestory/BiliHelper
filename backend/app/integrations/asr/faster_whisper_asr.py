@@ -71,6 +71,10 @@ class FasterWhisperProvider(ASRProvider):
                 os.remove(sp)
             except OSError:
                 pass
+        try:
+            os.rmdir(output_dir)
+        except OSError:
+            pass
 
         return all_segments
 

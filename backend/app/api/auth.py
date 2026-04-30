@@ -13,14 +13,14 @@ router = APIRouter(prefix="/api/auth", tags=["认证"])
 @router.post("/register", response_model=TokenResponse, status_code=201)
 def register(body: UserRegister, db: Session = Depends(get_db)):
     svc = AuthService(db)
-    user, access, refresh = svc.register(username=body.username, password=body.password, email=body.email)
+    _, access, refresh = svc.register(username=body.username, password=body.password, email=body.email)
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 
 @router.post("/login", response_model=TokenResponse)
 def login(body: UserLogin, db: Session = Depends(get_db)):
     svc = AuthService(db)
-    user, access, refresh = svc.login(username=body.username, password=body.password)
+    _, access, refresh = svc.login(username=body.username, password=body.password)
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 

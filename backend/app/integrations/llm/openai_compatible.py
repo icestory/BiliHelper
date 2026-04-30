@@ -45,7 +45,14 @@ class OpenAICompatibleProvider(LLMProvider):
         resp.raise_for_status()
 
         data = resp.json()
+        # 防御性检查：API 可能返回异常结构
+        if "choices" not in data or len(data["choices"]) == 0:
+            raise ValueError(f"LLM API 返回异常: choices 为空 — {str(data)[:200]}")
+        if "message" not in data["choices"][0] or "content" not in data["choices"][0]["message"]:
+            raise ValueError(f"LLM API 返回异常: 缺少 message/content — {str(data)[:200]}")
         content = data["choices"][0]["message"]["content"]
+        if content is None:
+            raise ValueError("LLM 返回 content 为 null")
 
         try:
             return json.loads(content)

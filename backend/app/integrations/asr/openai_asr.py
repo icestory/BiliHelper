@@ -44,12 +44,16 @@ class OpenAIASRProvider(ASRProvider):
 
             time_offset += slice_duration
 
-        # 清理切片文件
+        # 清理切片文件和临时目录
         for sp in slices:
             try:
                 os.remove(sp)
             except OSError:
                 pass
+        try:
+            os.rmdir(output_dir)
+        except OSError:
+            pass
 
         return all_segments
 

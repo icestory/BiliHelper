@@ -5,6 +5,7 @@ const API_BASE = "/api";
 // 内存中保存 token，页面刷新后需重新登录（后续可扩展 refresh token 持久化）
 let accessToken: string | null = null;
 let refreshToken: string | null = null;
+let refreshPromise: Promise<boolean> | null = null;  // 防止并发刷新
 
 export function setTokens(access: string, refresh: string): void {
   accessToken = access;
@@ -31,19 +32,28 @@ export function getAccessToken(): string | null {
 
 async function refreshAccessToken(): Promise<boolean> {
   if (!refreshToken) return false;
-  try {
-    const res = await fetch(`${API_BASE}/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-    if (!res.ok) return false;
-    const data: TokenResponse = await res.json();
-    setTokens(data.access_token, data.refresh_token);
-    return true;
-  } catch {
-    return false;
-  }
+  // 复用已有的刷新请求，防止并发 401 竞态
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!res.ok) return false;
+      const data: TokenResponse = await res.json();
+      setTokens(data.access_token, data.refresh_token);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
 }
 
 export async function apiFetch(

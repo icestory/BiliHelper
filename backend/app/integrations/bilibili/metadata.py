@@ -70,7 +70,7 @@ def _parse_response(data: dict[str, Any]) -> VideoInfo:
 
     # 处理发布时间
     pubdate = data.get("pubdate")
-    if pubdate:
+    if pubdate is not None:
         from datetime import datetime, timezone
         video.published_at = datetime.fromtimestamp(pubdate, tz=timezone.utc).isoformat()
 

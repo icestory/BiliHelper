@@ -91,8 +91,9 @@ def cleanup_audio(file_path: str) -> None:
 def cleanup_temp_dir() -> None:
     """清理临时目录中的过期文件"""
     import time
+    from app.core.config import settings
     _ensure_temp_dir()
-    ttl = int(os.getenv("TEMP_FILE_TTL_HOURS", "24"))
+    ttl = settings.TEMP_FILE_TTL_HOURS
     now = time.time()
     for f in TEMP_DIR.glob("*"):
         if f.is_file() and now - f.stat().st_mtime > ttl * 3600:

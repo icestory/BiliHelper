@@ -34,9 +34,7 @@ class Settings(BaseSettings):
     API_BASE_URL: str = "http://localhost:8000"
     WEB_BASE_URL: str = "http://localhost:5173"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = {"env_file": ".env", "case_sensitive": True}
 
 
 settings = Settings()

@@ -6,14 +6,18 @@ import HistoryPage from "../pages/HistoryPage";
 import VideoDetailPage from "../pages/VideoDetailPage";
 import TaskProgressPage from "../pages/TaskProgressPage";
 import PartAnalysisPage from "../pages/PartAnalysisPage";
+import AuthGuard from "../components/AuthGuard";
+
+const auth = (el: React.ReactNode) => <AuthGuard>{el}</AuthGuard>;
 
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
   { path: "/register", element: <RegisterPage /> },
-  { path: "/videos/new", element: <VideoNewPage /> },
-  { path: "/history", element: <HistoryPage /> },
-  { path: "/videos/:videoId", element: <VideoDetailPage /> },
-  { path: "/videos/:videoId/parts/:partId", element: <PartAnalysisPage /> },
-  { path: "/tasks/:taskId", element: <TaskProgressPage /> },
+  { path: "/videos/new", element: auth(<VideoNewPage />) },
+  { path: "/history", element: auth(<HistoryPage />) },
+  { path: "/videos/:videoId", element: auth(<VideoDetailPage />) },
+  { path: "/videos/:videoId/parts/:partId", element: auth(<PartAnalysisPage />) },
+  { path: "/tasks/:taskId", element: auth(<TaskProgressPage />) },
+  { path: "/", element: <Navigate to="/login" replace /> },
   { path: "*", element: <Navigate to="/login" replace /> },
 ]);

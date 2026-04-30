@@ -51,7 +51,6 @@ def get_video_history(
     page_size: int = 20,
     q: str | None = None,
     owner: str | None = None,
-    status: str | None = None,
 ) -> list[Video]:
     """获取用户分析过的视频历史（通过 analysis_tasks 关联）"""
     from app.models.task import AnalysisTask

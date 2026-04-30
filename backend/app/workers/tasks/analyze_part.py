@@ -32,8 +32,8 @@ def _load_prompt(name: str) -> str:
     return ""
 
 
-def _get_llm_provider(db, user_id: int) -> OpenAICompatibleProvider:
-    """获取用户的默认 LLM provider"""
+def _get_llm_provider(db, user_id: int) -> tuple[OpenAICompatibleProvider, str, str]:
+    """获取用户的默认 LLM provider，返回 (provider, provider_name, model_name)"""
     cred = (
         db.query(ApiCredential)
         .filter(ApiCredential.user_id == user_id, ApiCredential.is_default == True)  # noqa: E712
@@ -45,11 +45,12 @@ def _get_llm_provider(db, user_id: int) -> OpenAICompatibleProvider:
         raise ValueError("未配置大模型 API Key，请先在设置中配置")
 
     api_key = decrypt_api_key(cred.api_key_encrypted)
-    return OpenAICompatibleProvider(
+    provider = OpenAICompatibleProvider(
         api_key=api_key,
         base_url=cred.api_base_url,
         default_model=cred.default_model,
     )
+    return provider, cred.provider, cred.default_model or "unknown"
 
 
 def _build_transcript_text(segments: list) -> str:
@@ -152,7 +153,7 @@ def start_analysis(self, task_id: int):
 
         # 获取 LLM provider
         try:
-            provider = _get_llm_provider(db, task.user_id)
+            provider, llm_provider_name, llm_model = _get_llm_provider(db, task.user_id)
         except ValueError as e:
             task.status = "failed"
             task.error_message = str(e)
@@ -165,6 +166,11 @@ def start_analysis(self, task_id: int):
 
         completed = 0
         prompt_text = _load_prompt("summary_chapters_v1")
+        if not prompt_text.strip():
+            task.status = "failed"
+            task.error_message = "系统提示词模板缺失或为空"
+            db.commit()
+            return
 
         for sub in subs:
             part = part_map.get(sub.video_part_id)
@@ -264,8 +270,8 @@ def start_analysis(self, task_id: int):
                 # Step 4: 校验并保存结果
                 _validate_result(result)
                 _save_summary(db, sub.video_part_id, result,
-                              provider=cred.provider if (cred := _get_cred(db, task.user_id)) else "unknown",
-                              model=cred.default_model if cred else "unknown",
+                              provider=llm_provider_name,
+                              model=llm_model,
                               prompt_version="summary_chapters_v1")
                 _save_chapters(db, sub.video_part_id, result.get("chapters", []))
 
@@ -303,13 +309,16 @@ def start_analysis(self, task_id: int):
         db.commit()
 
     except Exception as e:
-        # 整体任务异常
-        task = db.query(AnalysisTask).filter(AnalysisTask.id == task_id).first()
-        if task:
-            task.status = "failed"
-            task.error_message = str(e)[:500]
-            task.finished_at = _utcnow()
-            db.commit()
+        # 整体任务异常 — 尝试记录失败状态
+        try:
+            task = db.query(AnalysisTask).filter(AnalysisTask.id == task_id).first()
+            if task:
+                task.status = "failed"
+                task.error_message = str(e)[:500]
+                task.finished_at = _utcnow()
+                db.commit()
+        except Exception:
+            db.rollback()
         raise self.retry(exc=e)
 
     finally:
@@ -359,8 +368,10 @@ def _generate_video_summary(db, video_id: int, user_id: int):
     if not part_summaries:
         return
 
-    provider = _get_llm_provider(db, user_id)
+    provider, provider_name, model_name = _get_llm_provider(db, user_id)
     prompt = _load_prompt("video_summary_v1")
+    if not prompt.strip():
+        return
 
     parts_text = "\n".join(
         f"P{pn}: {summary}" for pn, summary in sorted(part_summaries.items(), key=lambda x: int(x[0]))
@@ -371,15 +382,14 @@ def _generate_video_summary(db, video_id: int, user_id: int):
         user_message=f"以下是一个视频各分P的总结，请生成全视频总览：\n\n{parts_text}",
     )
 
-    cred = _get_cred(db, user_id)
     vs = VideoSummary(
         video_id=video_id,
         summary=result.get("summary", ""),
         detailed_summary=result.get("detailed_summary", ""),
         part_overview=result.get("part_overview", {}),
         key_points=result.get("key_points", []),
-        model_provider=cred.provider if cred else "unknown",
-        model_name=cred.default_model if cred else "unknown",
+        model_provider=provider_name,
+        model_name=model_name,
         prompt_version="video_summary_v1",
     )
     db.add(vs)
@@ -404,4 +414,4 @@ def _validate_result(result: dict) -> None:
             st = ch.get("start_time", 0)
             if st < prev_end:
                 raise ValueError(f"章节时间未递增: start_time={st} < prev_end={prev_end}")
-            prev_end = ch.get("end_time", st)
+            prev_end = ch.get("end_time") or st  # 防御 LLM 返回 null
