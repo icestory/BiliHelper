@@ -82,6 +82,12 @@ class VideoService:
                 )
             else:
                 part = next(p for p in existing_parts if p.cid == part_meta.cid)
+                # 刷新分 P 元数据（标题、时长等可能已变更）
+                video_repository.update_video_part(self.db, part,
+                    title=part_meta.title,
+                    duration=part_meta.duration,
+                    source_url=part_meta.source_url,
+                )
 
             parts_response.append(PartResponse(
                 id=part.id,

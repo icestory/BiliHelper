@@ -2,10 +2,13 @@
 B 站链接解析器
 负责：链接归一化、BV/AV 提取、短链展开、分 P 参数提取
 """
+import logging
 import re
 from dataclasses import dataclass
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 # 支持的链接格式
 _BV_PATTERN = re.compile(r"(?:bilibili\.com/video/|b23\.tv/)?(BV[a-zA-Z0-9]{10})")
@@ -50,7 +53,7 @@ def _expand_short_link(short_url: str) -> str | None:
             # 去掉 ?spm_id_from=... 等追踪参数
             return location.split("?")[0]
     except Exception:
-        pass
+        logger.warning("b23.tv 短链展开失败: %s", short_url, exc_info=True)
     return None
 
 

@@ -47,8 +47,7 @@ def create_credential(
 
 def update_credential(db: Session, credential: ApiCredential, **kwargs) -> ApiCredential:
     for key, value in kwargs.items():
-        if value is not None:
-            setattr(credential, key, value)
+        setattr(credential, key, value)
     db.commit()
     db.refresh(credential)
     return credential

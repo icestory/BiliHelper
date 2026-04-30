@@ -21,8 +21,7 @@ def create_video(db: Session, **kwargs) -> Video:
 
 def update_video(db: Session, video: Video, **kwargs) -> Video:
     for key, value in kwargs.items():
-        if value is not None:
-            setattr(video, key, value)
+        setattr(video, key, value)
     db.commit()
     db.refresh(video)
     return video
@@ -31,6 +30,14 @@ def update_video(db: Session, video: Video, **kwargs) -> Video:
 def create_video_part(db: Session, **kwargs) -> VideoPart:
     part = VideoPart(**kwargs)
     db.add(part)
+    db.commit()
+    db.refresh(part)
+    return part
+
+
+def update_video_part(db: Session, part: VideoPart, **kwargs) -> VideoPart:
+    for key, value in kwargs.items():
+        setattr(part, key, value)
     db.commit()
     db.refresh(part)
     return part

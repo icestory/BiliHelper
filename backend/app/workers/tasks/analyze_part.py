@@ -16,10 +16,11 @@ from app.models.transcript import TranscriptSegment
 from app.models.summary import PartSummary, Chapter
 from app.models.user import ApiCredential
 from app.repositories import video_repository
-from app.integrations.bilibili.subtitles import get_subtitles, check_subtitle_available
+from app.integrations.bilibili.subtitles import get_subtitles, check_subtitle_available, SubtitleSegment
 from app.integrations.bilibili.audio import extract_audio, cleanup_audio
 from app.integrations.llm import OpenAICompatibleProvider
 from app.integrations.asr import OpenAIASRProvider, ASRSegment
+from app.services.llm_factory import create_llm_provider
 
 
 def _utcnow():
@@ -35,25 +36,6 @@ def _load_prompt(name: str) -> str:
     return ""
 
 
-def _get_llm_provider(db, user_id: int) -> tuple[OpenAICompatibleProvider, str, str]:
-    """获取用户的默认 LLM provider，返回 (provider, provider_name, model_name)"""
-    cred = (
-        db.query(ApiCredential)
-        .filter(ApiCredential.user_id == user_id, ApiCredential.is_default == True)  # noqa: E712
-        .first()
-    )
-    if not cred:
-        cred = db.query(ApiCredential).filter(ApiCredential.user_id == user_id).first()
-    if not cred:
-        raise ValueError("未配置大模型 API Key，请先在设置中配置")
-
-    api_key = decrypt_api_key(cred.api_key_encrypted)
-    provider = OpenAICompatibleProvider(
-        api_key=api_key,
-        base_url=cred.api_base_url,
-        default_model=cred.default_model,
-    )
-    return provider, cred.provider, cred.default_model or "unknown"
 
 
 def _build_transcript_text(segments: list) -> str:
@@ -159,7 +141,7 @@ def start_analysis(self, task_id: int):
 
         # 获取 LLM provider
         try:
-            provider, llm_provider_name, llm_model = _get_llm_provider(db, task.user_id)
+            provider, llm_provider_name, llm_model = create_llm_provider(db, task.user_id)
         except ValueError as e:
             task.status = "failed"
             task.error_message = str(e)
@@ -214,7 +196,6 @@ def start_analysis(self, task_id: int):
                         for i, seg in enumerate(asr_segments):
                             if not seg.text.strip():
                                 continue
-                            from app.integrations.bilibili.subtitles import SubtitleSegment
                             segments.append(SubtitleSegment(
                                 start_time=seg.start_time,
                                 end_time=seg.end_time,
@@ -376,7 +357,7 @@ def _generate_video_summary(db, video_id: int, user_id: int):
     if not part_summaries:
         return
 
-    provider, provider_name, model_name = _get_llm_provider(db, user_id)
+    provider, provider_name, model_name = create_llm_provider(db, user_id)
     prompt = _load_prompt("video_summary_v1")
     if not prompt.strip():
         return
@@ -420,6 +401,11 @@ def _validate_result(result: dict) -> None:
             if not isinstance(ch, dict):
                 raise ValueError("章节项不是有效的 JSON 对象")
             st = ch.get("start_time", 0)
+            # 防卫 LLM 返回字符串/浮点数时间戳
+            try:
+                st = float(st)
+            except (TypeError, ValueError):
+                raise ValueError(f"章节 start_time 格式无效: {st}")
             if st < prev_end:
                 raise ValueError(f"章节时间未递增: start_time={st} < prev_end={prev_end}")
             prev_end = ch.get("end_time") or st  # 防御 LLM 返回 null

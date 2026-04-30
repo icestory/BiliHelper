@@ -5,10 +5,12 @@ import type { VideoHistoryItem } from "../types";
 
 export default function HistoryPage() {
   const [items, setItems] = useState<VideoHistoryItem[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
+  const pageSize = 20;
 
   const fetchHistory = async () => {
     setLoading(true);
@@ -24,6 +26,7 @@ export default function HistoryPage() {
       }
       const data = await res.json();
       setItems(data.items || []);
+      setTotal(data.total || 0);
     } catch {
       setError("网络错误");
     } finally {
@@ -43,7 +46,7 @@ export default function HistoryPage() {
         setItems(prev => prev.filter((i) => i.id !== videoId));
       }
     } catch {
-      // 删除失败静默处理
+      setError("删除失败，请重试");
     }
   };
 
@@ -87,7 +90,7 @@ export default function HistoryPage() {
       <div style={{ marginTop: "1rem" }}>
         <button disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
         <span style={{ margin: "0 0.5rem" }}>第 {page} 页</span>
-        <button onClick={() => setPage(page + 1)}>下一页</button>
+        <button disabled={page * pageSize >= total} onClick={() => setPage(page + 1)}>下一页</button>
       </div>
     </div>
   );

@@ -30,7 +30,7 @@ class OpenAICompatibleProvider(LLMProvider):
             "Content-Type": "application/json",
         }
 
-        body = {
+        body: dict = {
             "model": model or self.default_model,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -38,8 +38,10 @@ class OpenAICompatibleProvider(LLMProvider):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            "response_format": {"type": "json_object"},
         }
+        # response_format 仅对 openai 系 provider 启用
+        if not self.base_url or "openai.com" in self.base_url or "/v1" in (self.base_url or ""):
+            body["response_format"] = {"type": "json_object"}
 
         resp = httpx.post(url, headers=headers, json=body, timeout=120)
         resp.raise_for_status()

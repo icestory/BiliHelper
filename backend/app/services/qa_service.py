@@ -88,9 +88,8 @@ def _build_context(db: Session, part_ids: list[int], video_id: int, question: st
 
 
 def _get_qa_provider(db: Session, user_id: int) -> OpenAICompatibleProvider:
-    """获取 LLM provider（重用分析任务逻辑）"""
-    from app.workers.tasks.analyze_part import _get_llm_provider
-    provider, _, _ = _get_llm_provider(db, user_id)
+    from app.services.llm_factory import create_llm_provider
+    provider, _, _ = create_llm_provider(db, user_id)
     return provider
 
 

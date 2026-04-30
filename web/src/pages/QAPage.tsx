@@ -10,6 +10,7 @@ export default function QAPage() {
   const [messages, setMessages] = useState<QAMessageResponse[]>([]);
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const messagesEnd = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,7 +39,7 @@ export default function QAPage() {
     const res = await createQASession(Number(videoId), undefined, "video");
     if (res.ok) {
       const s = await res.json();
-      setSessions([s, ...sessions]);
+      setSessions(prev => [s, ...prev]);
       setActiveSessionId(s.id);
     }
   };
@@ -52,9 +53,11 @@ export default function QAPage() {
         const msg = await res.json();
         setMessages(prev => [...prev, msg]);
         setInput("");
+      } else {
+        setError("发送失败，请重试");
       }
     } catch {
-      // ignore
+      setError("网络错误，请重试");
     } finally {
       setSubmitting(false);
     }
@@ -64,6 +67,7 @@ export default function QAPage() {
     <div>
       <Link to={`/videos/${videoId}`}>← 返回视频</Link>
       <h1>视频问答</h1>
+      {error && <p style={{ color: "red" }}>{error}</p>}
 
       <div style={{ display: "flex", gap: "1rem" }}>
         <div style={{ width: 200, flexShrink: 0 }}>

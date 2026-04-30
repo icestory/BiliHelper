@@ -72,7 +72,10 @@ def _parse_response(data: dict[str, Any]) -> VideoInfo:
     pubdate = data.get("pubdate")
     if pubdate is not None:
         from datetime import datetime, timezone
-        video.published_at = datetime.fromtimestamp(pubdate, tz=timezone.utc).isoformat()
+        try:
+            video.published_at = datetime.fromtimestamp(float(pubdate), tz=timezone.utc).isoformat()
+        except (TypeError, ValueError, OSError):
+            pass  # 无法解析的时间戳保持为 None
 
     parts = []
     for page in data.get("pages", []):
