@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
+from app.models.qa import QASession
 from app.services.qa_service import QAService
 
 router = APIRouter(prefix="/api", tags=["问答"])
@@ -80,7 +81,6 @@ def create_session(
     db: Session = Depends(get_db),
 ):
     """创建问答会话"""
-    from app.models.qa import QASession
     svc = QAService(db)
     session = svc.create_session(
         user_id=current_user.id,

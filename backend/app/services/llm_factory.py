@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.security import decrypt_api_key
 from app.models.user import ApiCredential
 from app.integrations.llm import OpenAICompatibleProvider
+from app.services.credential_service import validate_api_base_url
 
 
 def create_llm_provider(db: Session, user_id: int) -> tuple[OpenAICompatibleProvider, str, str]:
@@ -19,9 +20,10 @@ def create_llm_provider(db: Session, user_id: int) -> tuple[OpenAICompatibleProv
         raise ValueError("未配置大模型 API Key，请先在设置中配置")
 
     api_key = decrypt_api_key(cred.api_key_encrypted)
+    api_base_url = validate_api_base_url(cred.api_base_url)
     provider = OpenAICompatibleProvider(
         api_key=api_key,
-        base_url=cred.api_base_url,
+        base_url=api_base_url,
         default_model=cred.default_model,
     )
     return provider, cred.provider, cred.default_model or "unknown"

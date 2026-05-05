@@ -30,6 +30,10 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
+export function getRefreshToken(): string | null {
+  return refreshToken;
+}
+
 async function refreshAccessToken(): Promise<boolean> {
   if (!refreshToken) return false;
   // 复用已有的刷新请求，防止并发 401 竞态

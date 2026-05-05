@@ -4,7 +4,6 @@
 """
 import os
 import subprocess
-import tempfile
 import uuid
 from pathlib import Path
 
@@ -58,6 +57,7 @@ def extract_audio(bvid: str, cid: int, page_no: int = 1) -> str:
         output_path,
     ]
 
+    ytdlp_proc = None
     try:
         ytdlp_proc = subprocess.Popen(
             ytdlp_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
@@ -66,14 +66,14 @@ def extract_audio(bvid: str, cid: int, page_no: int = 1) -> str:
         # 等待 yt-dlp 进程退出，允许 60 秒清理
         ytdlp_proc.wait(timeout=60)
     except subprocess.TimeoutExpired:
-        ytdlp_proc.kill()
-        ytdlp_proc.wait(timeout=5)
+        if ytdlp_proc:
+            ytdlp_proc.kill()
+            ytdlp_proc.wait(timeout=5)
         raise RuntimeError("音频提取超时（超过 15 分钟）")
     except Exception as e:
-        ytdlp_proc.kill()
-        ytdlp_proc.wait(timeout=5)
-        raise RuntimeError(f"音频提取失败: {str(e)}")
-    except Exception as e:
+        if ytdlp_proc:
+            ytdlp_proc.kill()
+            ytdlp_proc.wait(timeout=5)
         raise RuntimeError(f"音频提取失败: {str(e)}")
 
     # 验证文件存在且非空

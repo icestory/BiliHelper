@@ -5,10 +5,11 @@ Markdown 导出服务
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.video import Video, VideoPart
+from app.models.video import VideoPart
 from app.models.transcript import TranscriptSegment
-from app.models.summary import PartSummary, Chapter, VideoSummary
+from app.models.summary import PartSummary, Chapter
 from app.models.qa import QASession, QAMessage
+from app.services.access_control import ensure_video_access, get_latest_part_task, get_latest_video_summary_for_user
 
 
 def _format_time(seconds: float) -> str:
@@ -17,17 +18,15 @@ def _format_time(seconds: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
-def export_video_md(db: Session, video_id: int, *,
+def export_video_md(db: Session, video_id: int, user_id: int, *,
                     include_transcript: bool = True,
                     include_chapters: bool = True,
                     include_qa: bool = False) -> str:
     """导出全视频 Markdown"""
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="视频不存在")
+    video = ensure_video_access(db, user_id, video_id)
 
     parts = db.query(VideoPart).filter(VideoPart.video_id == video_id).order_by(VideoPart.page_no).all()
-    vs = db.query(VideoSummary).filter(VideoSummary.video_id == video_id).order_by(VideoSummary.id.desc()).first()
+    vs = get_latest_video_summary_for_user(db, user_id, video_id)
 
     md = f"# {video.title}\n\n"
     md += f"- UP 主：{video.owner_name or '未知'}\n"
@@ -64,8 +63,16 @@ def export_video_md(db: Session, video_id: int, *,
     # 每个分 P 详情
     for p in parts:
         md += f"## P{p.page_no} {p.title or ''}\n\n"
+        sub = get_latest_part_task(db, user_id, p.id, completed_only=True)
 
-        ps = db.query(PartSummary).filter(PartSummary.video_part_id == p.id).order_by(PartSummary.id.desc()).first()
+        ps = None
+        if sub:
+            ps = (
+                db.query(PartSummary)
+                .filter(PartSummary.video_part_id == p.id, PartSummary.part_analysis_task_id == sub.id)
+                .order_by(PartSummary.id.desc())
+                .first()
+            )
         if ps:
             md += "### 摘要\n\n"
             if ps.summary:
@@ -79,7 +86,14 @@ def export_video_md(db: Session, video_id: int, *,
                 md += "\n"
 
         if include_chapters:
-            chapters = db.query(Chapter).filter(Chapter.video_part_id == p.id).order_by(Chapter.sequence_no).all()
+            chapters = []
+            if sub:
+                chapters = (
+                    db.query(Chapter)
+                    .filter(Chapter.video_part_id == p.id, Chapter.part_analysis_task_id == sub.id)
+                    .order_by(Chapter.sequence_no)
+                    .all()
+                )
             if chapters:
                 md += "### 章节\n\n"
                 for ch in chapters:
@@ -91,12 +105,17 @@ def export_video_md(db: Session, video_id: int, *,
                 md += "\n"
 
         if include_transcript:
-            segments = (
-                db.query(TranscriptSegment)
-                .filter(TranscriptSegment.video_part_id == p.id)
-                .order_by(TranscriptSegment.sequence_no)
-                .all()
-            )
+            segments = []
+            if sub:
+                segments = (
+                    db.query(TranscriptSegment)
+                    .filter(
+                        TranscriptSegment.video_part_id == p.id,
+                        TranscriptSegment.part_analysis_task_id == sub.id,
+                    )
+                    .order_by(TranscriptSegment.sequence_no)
+                    .all()
+                )
             if segments:
                 md += "### 文案\n\n"
                 for seg in segments:
@@ -105,7 +124,12 @@ def export_video_md(db: Session, video_id: int, *,
 
     # 问答记录
     if include_qa:
-        sessions = db.query(QASession).filter(QASession.video_id == video_id).order_by(QASession.created_at).all()
+        sessions = (
+            db.query(QASession)
+            .filter(QASession.video_id == video_id, QASession.user_id == user_id)
+            .order_by(QASession.created_at)
+            .all()
+        )
         if sessions:
             md += "## 问答记录\n\n"
             for sess in sessions:
@@ -125,14 +149,17 @@ def export_video_md(db: Session, video_id: int, *,
     return md
 
 
-def export_part_md(db: Session, part_id: int, *,
+def export_part_md(db: Session, part_id: int, user_id: int, *,
                    include_transcript: bool = True,
                    include_chapters: bool = True) -> str:
     """导出单 P Markdown"""
     part = db.query(VideoPart).filter(VideoPart.id == part_id).first()
     if not part:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分 P 不存在")
-    video = db.query(Video).filter(Video.id == part.video_id).first()
+    video = ensure_video_access(db, user_id, part.video_id)
+    sub = get_latest_part_task(db, user_id, part_id, completed_only=True)
+    if not sub:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析结果不存在")
 
     md = f"# {video.title if video else ''} — P{part.page_no} {part.title or ''}\n\n"
     if video:
@@ -140,7 +167,12 @@ def export_part_md(db: Session, part_id: int, *,
         md += f"- 链接：{part.source_url or video.source_url}\n"
     md += "\n"
 
-    ps = db.query(PartSummary).filter(PartSummary.video_part_id == part_id).order_by(PartSummary.id.desc()).first()
+    ps = (
+        db.query(PartSummary)
+        .filter(PartSummary.video_part_id == part_id, PartSummary.part_analysis_task_id == sub.id)
+        .order_by(PartSummary.id.desc())
+        .first()
+    )
     if ps:
         md += "## 摘要\n\n"
         if ps.summary:
@@ -154,7 +186,12 @@ def export_part_md(db: Session, part_id: int, *,
             md += "\n"
 
     if include_chapters:
-        chapters = db.query(Chapter).filter(Chapter.video_part_id == part_id).order_by(Chapter.sequence_no).all()
+        chapters = (
+            db.query(Chapter)
+            .filter(Chapter.video_part_id == part_id, Chapter.part_analysis_task_id == sub.id)
+            .order_by(Chapter.sequence_no)
+            .all()
+        )
         if chapters:
             md += "## 章节\n\n"
             for ch in chapters:
@@ -167,7 +204,7 @@ def export_part_md(db: Session, part_id: int, *,
     if include_transcript:
         segments = (
             db.query(TranscriptSegment)
-            .filter(TranscriptSegment.video_part_id == part_id)
+            .filter(TranscriptSegment.video_part_id == part_id, TranscriptSegment.part_analysis_task_id == sub.id)
             .order_by(TranscriptSegment.sequence_no)
             .all()
         )

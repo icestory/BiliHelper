@@ -7,11 +7,15 @@ from sqlalchemy.orm import Session
 
 from app.models.qa import QASession, QAMessage
 from app.models.transcript import TranscriptChunk
-from app.models.summary import PartSummary, Chapter, VideoSummary
+from app.models.summary import PartSummary, Chapter
 from app.models.video import VideoPart
-from app.core.security import decrypt_api_key
-from app.models.user import ApiCredential
 from app.integrations.llm import OpenAICompatibleProvider
+from app.services.access_control import (
+    ensure_video_access,
+    ensure_part_in_video,
+    get_latest_part_task,
+    get_latest_video_summary_for_user,
+)
 
 
 QA_PROMPT = """你是一个视频内容问答助手。请根据提供的视频信息回答用户问题。
@@ -29,17 +33,23 @@ QA_PROMPT = """你是一个视频内容问答助手。请根据提供的视频�
 {context}"""
 
 
-def _search_chunks(db: Session, part_ids: list[int], query: str, top_k: int = 5) -> list[TranscriptChunk]:
+def _search_chunks(db: Session, part_task_ids: list[int], query: str, top_k: int = 5) -> list[TranscriptChunk]:
     """简单关键词匹配检索"""
     keywords = query.split()
+    if not keywords:
+        keywords = [query]
     results = []
 
-    for pid in part_ids:
-        chunks = db.query(TranscriptChunk).filter(TranscriptChunk.video_part_id == pid).all()
-        for ch in chunks:
-            score = sum(1 for kw in keywords if kw.lower() in ch.text.lower())
-            if score > 0:
-                results.append((ch, score))
+    chunks = (
+        db.query(TranscriptChunk)
+        .filter(TranscriptChunk.part_analysis_task_id.in_(part_task_ids))
+        .limit(200)
+        .all()
+    )
+    for ch in chunks:
+        score = sum(1 for kw in keywords if kw.lower() in ch.text.lower())
+        if score > 0:
+            results.append((ch, score))
 
     results.sort(key=lambda x: x[1], reverse=True)
     return [r[0] for r in results[:top_k]]
@@ -51,38 +61,53 @@ def _format_time(seconds: float) -> str:
     return f"{m:02d}:{s:02d}"
 
 
-def _build_context(db: Session, part_ids: list[int], video_id: int, question: str) -> str:
+def _build_context(db: Session, part_ids: list[int], video_id: int, user_id: int, question: str) -> str:
     """构建 QA 上下文"""
     parts_text = []
 
     # 1. 全视频总结
-    vs = db.query(VideoSummary).filter(VideoSummary.video_id == video_id).order_by(VideoSummary.id.desc()).first()
+    vs = get_latest_video_summary_for_user(db, user_id, video_id)
     if vs and vs.summary:
         parts_text.append(f"【全视频总结】\n{vs.summary}")
 
     # 2. 各 P 总结 + 章节
+    part_task_ids = []
     for pid in part_ids:
+        sub = get_latest_part_task(db, user_id, pid, completed_only=True)
+        if not sub:
+            continue
+        part_task_ids.append(sub.id)
         part = db.query(VideoPart).filter(VideoPart.id == pid).first()
         part_title = part.title if part else f"P{pid}"
 
-        ps = db.query(PartSummary).filter(PartSummary.video_part_id == pid).order_by(PartSummary.id.desc()).first()
+        ps = (
+            db.query(PartSummary)
+            .filter(PartSummary.video_part_id == pid, PartSummary.part_analysis_task_id == sub.id)
+            .order_by(PartSummary.id.desc())
+            .first()
+        )
         if ps and ps.summary:
             parts_text.append(f"【{part_title} 总结】\n{ps.summary}")
 
-        chapters = db.query(Chapter).filter(Chapter.video_part_id == pid).order_by(Chapter.sequence_no).all()
+        chapters = (
+            db.query(Chapter)
+            .filter(Chapter.video_part_id == pid, Chapter.part_analysis_task_id == sub.id)
+            .order_by(Chapter.sequence_no)
+            .all()
+        )
         if chapters:
             ch_text = "\n".join(f"- {_format_time(c.start_time)} {c.title}: {c.description or ''}" for c in chapters)
             parts_text.append(f"【{part_title} 章节】\n{ch_text}")
 
     # 3. 检索相关 chunks
-    chunks = _search_chunks(db, part_ids, question, top_k=5)
+    chunks = _search_chunks(db, part_task_ids, question, top_k=5) if part_task_ids else []
     if chunks:
         chunk_lines = []
         for ch in chunks:
             part = db.query(VideoPart).filter(VideoPart.id == ch.video_part_id).first()
             pn = f"P{part.page_no}" if part else ""
             chunk_lines.append(f"[{pn} {_format_time(ch.start_time)}] {ch.text}")
-        parts_text.append(f"【相关文案片段】\n" + "\n---\n".join(chunk_lines))
+        parts_text.append("【相关文案片段】\n" + "\n---\n".join(chunk_lines))
 
     return "\n\n".join(parts_text)
 
@@ -99,6 +124,17 @@ class QAService:
 
     def create_session(self, user_id: int, video_id: int, scope: str = "video",
                        part_ids: list[int] | None = None, title: str | None = None) -> QASession:
+        ensure_video_access(self.db, user_id, video_id)
+        if scope not in {"video", "selected_parts", "current_part"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="问答范围无效")
+        if part_ids:
+            unique_part_ids = list(dict.fromkeys(part_ids))
+            for pid in unique_part_ids:
+                ensure_part_in_video(self.db, video_id, pid)
+                if not get_latest_part_task(self.db, user_id, pid, completed_only=True):
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="选择的分 P 尚无可用分析结果")
+            part_ids = unique_part_ids
+
         session = QASession(
             user_id=user_id,
             video_id=video_id,
@@ -125,7 +161,9 @@ class QAService:
             part_ids = [p.id for p in parts]
 
         # 构建上下文
-        context = _build_context(self.db, part_ids, session.video_id, question)
+        context = _build_context(self.db, part_ids, session.video_id, user_id, question)
+        if not context.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="暂无可用于问答的分析内容")
 
         # 调用 LLM
         provider = _get_qa_provider(self.db, user_id)

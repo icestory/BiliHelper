@@ -3,7 +3,6 @@ import os
 import subprocess
 import tempfile
 import math
-from pathlib import Path
 
 import httpx
 

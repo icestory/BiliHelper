@@ -1,10 +1,19 @@
 import { Link, useNavigate } from "react-router-dom";
-import { clearTokens } from "../api/client";
+import { logout } from "../api/auth";
+import { clearTokens, getRefreshToken } from "../api/client";
 
 export default function NavBar() {
   const navigate = useNavigate();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const refreshToken = getRefreshToken();
+    if (refreshToken) {
+      try {
+        await logout(refreshToken);
+      } catch {
+        // 本地退出优先，服务端撤销失败不阻塞用户离开当前会话。
+      }
+    }
     clearTokens();
     navigate("/login");
   };

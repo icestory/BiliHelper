@@ -44,7 +44,7 @@ class FasterWhisperProvider(ASRProvider):
         return self._model
 
     def transcribe(self, audio_path: str) -> list[ASRSegment]:
-        model = self._load_model()
+        self._load_model()
 
         # 检查时长，长音频切片处理
         duration = self._get_audio_duration(audio_path)

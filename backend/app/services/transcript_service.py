@@ -17,7 +17,7 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 3)
 
 
-def build_chunks(db: Session, part_id: int) -> int:
+def build_chunks(db: Session, part_id: int, part_analysis_task_id: int | None = None) -> int:
     """
     为指定分 P 构建 transcript_chunks
     先删旧数据再重建（幂等操作）
@@ -26,7 +26,10 @@ def build_chunks(db: Session, part_id: int) -> int:
         创建的 chunk 数量
     """
     # 清除旧 chunk
-    db.query(TranscriptChunk).filter(TranscriptChunk.video_part_id == part_id).delete()
+    delete_query = db.query(TranscriptChunk).filter(TranscriptChunk.video_part_id == part_id)
+    if part_analysis_task_id is not None:
+        delete_query = delete_query.filter(TranscriptChunk.part_analysis_task_id == part_analysis_task_id)
+    delete_query.delete()
 
     # 获取所有 segments
     segments = (
@@ -43,7 +46,6 @@ def build_chunks(db: Session, part_id: int) -> int:
     current_texts: list[str] = []
     current_len = 0
     current_start = segments[0].start_time
-    overlap_buffer = ""
 
     for seg in segments:
         seg_text = seg.text.strip()
@@ -85,6 +87,7 @@ def build_chunks(db: Session, part_id: int) -> int:
     for i, ch in enumerate(chunks):
         tc = TranscriptChunk(
             video_part_id=part_id,
+            part_analysis_task_id=part_analysis_task_id,
             start_time=ch["start_time"],
             end_time=ch["end_time"],
             text=ch["text"],

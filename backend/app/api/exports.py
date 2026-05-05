@@ -21,7 +21,7 @@ def download_video_md(
 ):
     """导出全视频 Markdown"""
     md = export_video_md(
-        db, video_id,
+        db, video_id, current_user.id,
         include_transcript=include_transcript,
         include_chapters=include_chapters,
         include_qa=include_qa,
@@ -39,7 +39,7 @@ def download_part_md(
 ):
     """导出单 P Markdown"""
     md = export_part_md(
-        db, part_id,
+        db, part_id, current_user.id,
         include_transcript=include_transcript,
         include_chapters=include_chapters,
     )

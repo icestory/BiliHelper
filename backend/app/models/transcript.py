@@ -11,6 +11,9 @@ class TranscriptSegment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     video_part_id: Mapped[int] = mapped_column(ForeignKey("video_parts.id"), nullable=False, index=True)
+    part_analysis_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("part_analysis_tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     source: Mapped[str] = mapped_column(String(20), nullable=False)  # bili_subtitle / asr
     start_time: Mapped[float] = mapped_column(Float, nullable=False)  # 秒
     end_time: Mapped[float] = mapped_column(Float, nullable=False)  # 秒
@@ -25,6 +28,9 @@ class TranscriptChunk(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     video_part_id: Mapped[int] = mapped_column(ForeignKey("video_parts.id"), nullable=False, index=True)
+    part_analysis_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("part_analysis_tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     start_time: Mapped[float] = mapped_column(Float, nullable=False)
     end_time: Mapped[float] = mapped_column(Float, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)

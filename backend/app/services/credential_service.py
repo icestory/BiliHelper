@@ -1,6 +1,11 @@
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.security import encrypt_api_key, decrypt_api_key
 from app.models.user import ApiCredential
 from app.repositories import credential_repository
@@ -12,6 +17,58 @@ def mask_api_key(key: str) -> str:
     if len(key) <= 7:
         return "****"
     return f"{key[:3]}{'*' * 4}{key[-4:]}"
+
+
+def _is_blocked_ip(ip: str) -> bool:
+    addr = ipaddress.ip_address(ip)
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_multicast
+        or addr.is_reserved
+        or addr.is_unspecified
+    )
+
+
+def validate_api_base_url(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    url = raw.strip().rstrip("/")
+    if not url:
+        return None
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Base URL 必须是合法的 http(s) 地址")
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Base URL 不允许包含用户名或密码")
+
+    if settings.APP_ENV == "production":
+        if parsed.scheme != "https":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="生产环境 Base URL 必须使用 HTTPS")
+
+        host = parsed.hostname.lower()
+        if host in {"localhost"} or host.endswith(".local"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="生产环境不允许使用本机或内网 Base URL")
+
+        try:
+            if _is_blocked_ip(host):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="生产环境不允许使用内网 Base URL")
+        except ValueError:
+            try:
+                infos = socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)
+            except socket.gaierror:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Base URL 域名无法解析")
+            for info in infos:
+                resolved_ip = info[4][0]
+                try:
+                    if _is_blocked_ip(resolved_ip):
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="生产环境不允许使用内网 Base URL")
+                except ValueError:
+                    continue
+
+    return url
 
 
 def _to_response(cred: ApiCredential) -> ApiCredentialResponse:
@@ -43,12 +100,13 @@ class CredentialService:
             credential_repository.unset_default_for_user(self.db, user_id)
 
         encrypted = encrypt_api_key(data.api_key)
+        api_base_url = validate_api_base_url(data.api_base_url)
         cred = credential_repository.create_credential(
             self.db,
             user_id=user_id,
             provider=data.provider,
             api_key_encrypted=encrypted,
-            api_base_url=data.api_base_url,
+            api_base_url=api_base_url,
             default_model=data.default_model,
             default_asr_model=data.default_asr_model,
             default_embedding_model=data.default_embedding_model,
@@ -65,9 +123,13 @@ class CredentialService:
             credential_repository.unset_default_for_user(self.db, user_id)
 
         kwargs = data.model_dump(exclude_unset=True)
+        if "api_base_url" in kwargs:
+            kwargs["api_base_url"] = validate_api_base_url(kwargs["api_base_url"])
 
-        if "api_key" in kwargs and kwargs["api_key"] is not None:
-            kwargs["api_key_encrypted"] = encrypt_api_key(kwargs.pop("api_key"))
+        if "api_key" in kwargs:
+            api_key = kwargs.pop("api_key")
+            if api_key is not None:
+                kwargs["api_key_encrypted"] = encrypt_api_key(api_key)
 
         cred = credential_repository.update_credential(self.db, cred, **kwargs)
         return _to_response(cred)

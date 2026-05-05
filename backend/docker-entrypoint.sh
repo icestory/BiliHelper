@@ -7,10 +7,13 @@ until python -c "from app.core.database import engine; engine.connect()" 2>/dev/
   sleep 2
 done
 
-# 运行迁移
-echo "运行数据库迁移..."
-alembic revision --autogenerate -m "docker-auto-migration" 2>/dev/null || true
-alembic upgrade head
+# 运行已提交的迁移。迁移文件必须在开发阶段生成并审查，容器启动时不自动 autogenerate。
+if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
+  echo "运行数据库迁移..."
+  alembic upgrade head
+else
+  echo "跳过数据库迁移..."
+fi
 
 # 启动应用
 echo "启动 $@"

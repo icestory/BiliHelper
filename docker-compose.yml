@@ -20,6 +20,11 @@ services:
         condition: service_healthy
     volumes:
       - app_temp:/tmp/bilihelper
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   # 异步任务 Worker（字幕/ASR/LLM）
@@ -28,16 +33,15 @@ services:
     env_file:
       - .env
     depends_on:
-      postgres:
+      api:
         condition: service_healthy
       redis:
         condition: service_healthy
+    environment:
+      RUN_MIGRATIONS: "false"
     volumes:
       - app_temp:/tmp/bilihelper
-    entrypoint: ["/bin/bash", "-c"]
-    command:
-      - |
-        docker-entrypoint.sh celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
     restart: unless-stopped
 
   # 数据库

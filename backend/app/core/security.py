@@ -1,4 +1,3 @@
-import base64
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -17,9 +16,9 @@ def create_access_token(subject: str | int, expires_delta: timedelta | None = No
     return jwt.encode({"sub": str(subject), "exp": expire}, settings.APP_SECRET_KEY, algorithm="HS256")
 
 
-def create_refresh_token(subject: str | int) -> str:
+def create_refresh_token(subject: str | int, jti: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    return jwt.encode({"sub": str(subject), "exp": expire, "type": "refresh"}, settings.APP_SECRET_KEY, algorithm="HS256")
+    return jwt.encode({"sub": str(subject), "exp": expire, "type": "refresh", "jti": jti}, settings.APP_SECRET_KEY, algorithm="HS256")
 
 
 def decode_token(token: str) -> dict[str, Any]:

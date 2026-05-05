@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import distinct, func
 
 from app.models.video import Video, VideoPart
 
@@ -92,17 +93,27 @@ def count_video_history(
         query = query.filter(Video.title.ilike(f"%{q}%"))
     if owner:
         query = query.filter(Video.owner_name.ilike(f"%{owner}%"))
-    return query.count()
+    return query.with_entities(func.count(distinct(Video.id))).scalar() or 0
 
 
 def delete_video_history(db: Session, user_id: int, video_id: int) -> int:
     """删除用户对某个视频的分析记录（保留视频元数据）"""
-    from app.models.task import AnalysisTask
+    from app.models.task import AnalysisTask, PartAnalysisTask
 
+    task_ids = [
+        row[0]
+        for row in db.query(AnalysisTask.id)
+        .filter(AnalysisTask.user_id == user_id, AnalysisTask.video_id == video_id)
+        .all()
+    ]
+    if not task_ids:
+        return 0
+
+    db.query(PartAnalysisTask).filter(PartAnalysisTask.analysis_task_id.in_(task_ids)).delete(synchronize_session=False)
     deleted = (
         db.query(AnalysisTask)
         .filter(AnalysisTask.user_id == user_id, AnalysisTask.video_id == video_id)
-        .delete()
+        .delete(synchronize_session=False)
     )
     db.commit()
     return deleted

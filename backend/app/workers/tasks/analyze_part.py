@@ -6,8 +6,6 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 from app.workers.celery_app import celery_app
 from app.core.database import SessionLocal
 from app.core.security import decrypt_api_key
@@ -16,11 +14,13 @@ from app.models.transcript import TranscriptSegment
 from app.models.summary import PartSummary, Chapter
 from app.models.user import ApiCredential
 from app.repositories import video_repository
-from app.integrations.bilibili.subtitles import get_subtitles, check_subtitle_available, SubtitleSegment
+from app.integrations.bilibili.subtitles import get_subtitles, SubtitleSegment
 from app.integrations.bilibili.audio import extract_audio, cleanup_audio
-from app.integrations.llm import OpenAICompatibleProvider
-from app.integrations.asr import OpenAIASRProvider, ASRSegment
+from app.integrations.asr import OpenAIASRProvider
 from app.services.llm_factory import create_llm_provider
+from app.services.credential_service import validate_api_base_url
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow():
@@ -69,12 +69,16 @@ def _chunk_transcript(segments: list, max_chars: int = 8000) -> list[list]:
     return chunks
 
 
-def _save_transcript(db, part_id: int, segments: list, source: str) -> None:
+def _save_transcript(db, part_id: int, part_analysis_task_id: int, segments: list, source: str) -> None:
     """保存字幕/ASR 段落到数据库（先删旧数据，防止重试重复）"""
-    db.query(TranscriptSegment).filter(TranscriptSegment.video_part_id == part_id).delete()
+    db.query(TranscriptSegment).filter(
+        TranscriptSegment.video_part_id == part_id,
+        TranscriptSegment.part_analysis_task_id == part_analysis_task_id,
+    ).delete()
     for i, seg in enumerate(segments):
         ts = TranscriptSegment(
             video_part_id=part_id,
+            part_analysis_task_id=part_analysis_task_id,
             source=source,
             start_time=seg.start_time,
             end_time=seg.end_time,
@@ -85,11 +89,15 @@ def _save_transcript(db, part_id: int, segments: list, source: str) -> None:
     db.commit()
 
 
-def _save_summary(db, part_id: int, data: dict, provider: str, model: str, prompt_version: str) -> None:
+def _save_summary(db, part_id: int, part_analysis_task_id: int, data: dict, provider: str, model: str, prompt_version: str) -> None:
     """保存总结到数据库（先删旧数据，防止重试重复）"""
-    db.query(PartSummary).filter(PartSummary.video_part_id == part_id).delete()
+    db.query(PartSummary).filter(
+        PartSummary.video_part_id == part_id,
+        PartSummary.part_analysis_task_id == part_analysis_task_id,
+    ).delete()
     ps = PartSummary(
         video_part_id=part_id,
+        part_analysis_task_id=part_analysis_task_id,
         summary=data.get("summary", ""),
         detailed_summary=data.get("detailed_summary", ""),
         key_points=data.get("key_points", []),
@@ -101,12 +109,16 @@ def _save_summary(db, part_id: int, data: dict, provider: str, model: str, promp
     db.commit()
 
 
-def _save_chapters(db, part_id: int, chapters: list[dict]) -> None:
+def _save_chapters(db, part_id: int, part_analysis_task_id: int, chapters: list[dict]) -> None:
     """保存章节到数据库（先删旧数据，防止重试重复）"""
-    db.query(Chapter).filter(Chapter.video_part_id == part_id).delete()
+    db.query(Chapter).filter(
+        Chapter.video_part_id == part_id,
+        Chapter.part_analysis_task_id == part_analysis_task_id,
+    ).delete()
     for i, ch in enumerate(chapters):
         c = Chapter(
             video_part_id=part_id,
+            part_analysis_task_id=part_analysis_task_id,
             start_time=ch.get("start_time", 0),
             end_time=ch.get("end_time"),
             title=ch.get("title", ""),
@@ -142,7 +154,7 @@ def start_analysis(self, task_id: int):
         # 获取 LLM provider
         try:
             provider, llm_provider_name, llm_model = create_llm_provider(db, task.user_id)
-        except ValueError as e:
+        except Exception as e:
             task.status = "failed"
             task.error_message = str(e)
             db.commit()
@@ -161,6 +173,10 @@ def start_analysis(self, task_id: int):
             return
 
         for sub in subs:
+            if sub.status == "completed" and not task.force_reanalyze:
+                completed += 1
+                continue
+
             part = part_map.get(sub.video_part_id)
             if not part or not video:
                 continue
@@ -214,9 +230,9 @@ def start_analysis(self, task_id: int):
                             cleanup_audio(audio_path)
 
                 # Step 2: 保存 transcript + 构建检索 chunk
-                _save_transcript(db, sub.video_part_id, segments, source)
+                _save_transcript(db, sub.video_part_id, sub.id, segments, source)
                 from app.services.transcript_service import build_chunks
-                build_chunks(db, sub.video_part_id)
+                build_chunks(db, sub.video_part_id, sub.id)
                 sub.transcript_source = source
                 sub.progress = 40
                 db.commit()
@@ -258,11 +274,11 @@ def start_analysis(self, task_id: int):
 
                 # Step 4: 校验并保存结果
                 _validate_result(result)
-                _save_summary(db, sub.video_part_id, result,
+                _save_summary(db, sub.video_part_id, sub.id, result,
                               provider=llm_provider_name,
                               model=llm_model,
                               prompt_version="summary_chapters_v1")
-                _save_chapters(db, sub.video_part_id, result.get("chapters", []))
+                _save_chapters(db, sub.video_part_id, sub.id, result.get("chapters", []))
 
                 sub.status = "completed"
                 sub.progress = 100
@@ -279,7 +295,7 @@ def start_analysis(self, task_id: int):
         # 全视频总结（所有分P完成且有至少一个成功时）
         if completed > 0 and total > 0:
             try:
-                _generate_video_summary(db, task.video_id, task.user_id)
+                _generate_video_summary(db, task.id, task.video_id, task.user_id)
             except Exception:
                 logger.exception("全视频总结生成失败 video_id=%s", task.video_id)
 
@@ -315,9 +331,12 @@ def start_analysis(self, task_id: int):
 
 
 def _get_cred(db, user_id: int) -> ApiCredential | None:
-    return db.query(ApiCredential).filter(
+    cred = db.query(ApiCredential).filter(
         ApiCredential.user_id == user_id, ApiCredential.is_default == True  # noqa: E712
     ).first()
+    if cred:
+        return cred
+    return db.query(ApiCredential).filter(ApiCredential.user_id == user_id).first()
 
 
 def _get_asr_provider(db, user_id: int):
@@ -331,12 +350,12 @@ def _get_asr_provider(db, user_id: int):
 
     return OpenAIASRProvider(
         api_key=api_key,
-        base_url=cred.api_base_url,
+        base_url=validate_api_base_url(cred.api_base_url),
         model=asr_model,
     )
 
 
-def _generate_video_summary(db, video_id: int, user_id: int):
+def _generate_video_summary(db, task_id: int, video_id: int, user_id: int):
     """生成全视频总览总结（聚合各分P总结）"""
     from app.models.summary import PartSummary, VideoSummary
     from app.models.video import VideoPart
@@ -347,7 +366,12 @@ def _generate_video_summary(db, video_id: int, user_id: int):
     for part in parts:
         ps = (
             db.query(PartSummary)
-            .filter(PartSummary.video_part_id == part.id)
+            .join(PartAnalysisTask, PartAnalysisTask.id == PartSummary.part_analysis_task_id)
+            .filter(
+                PartSummary.video_part_id == part.id,
+                PartAnalysisTask.analysis_task_id == task_id,
+                PartAnalysisTask.status == "completed",
+            )
             .order_by(PartSummary.id.desc())
             .first()
         )
@@ -373,6 +397,7 @@ def _generate_video_summary(db, video_id: int, user_id: int):
 
     vs = VideoSummary(
         video_id=video_id,
+        analysis_task_id=task_id,
         summary=result.get("summary", ""),
         detailed_summary=result.get("detailed_summary", ""),
         part_overview=result.get("part_overview", {}),
@@ -406,6 +431,15 @@ def _validate_result(result: dict) -> None:
                 st = float(st)
             except (TypeError, ValueError):
                 raise ValueError(f"章节 start_time 格式无效: {st}")
+            ch["start_time"] = st
             if st < prev_end:
                 raise ValueError(f"章节时间未递增: start_time={st} < prev_end={prev_end}")
-            prev_end = ch.get("end_time") or st  # 防御 LLM 返回 null
+            end = ch.get("end_time")
+            if end is None:
+                prev_end = st
+            else:
+                try:
+                    prev_end = float(end)
+                except (TypeError, ValueError):
+                    raise ValueError(f"章节 end_time 格式无效: {end}")
+                ch["end_time"] = prev_end

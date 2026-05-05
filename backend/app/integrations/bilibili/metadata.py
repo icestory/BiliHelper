@@ -3,6 +3,7 @@ B 站视频元信息获取器
 通过 B 站公开 API 获取视频信息和分 P 列表
 """
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -25,7 +26,7 @@ class VideoMeta:
     cover_url: str | None
     duration: int | None  # 秒
     description: str | None
-    published_at: str | None  # ISO 格式时间戳
+    published_at: datetime | None
     part_count: int
 
 
@@ -71,9 +72,8 @@ def _parse_response(data: dict[str, Any]) -> VideoInfo:
     # 处理发布时间
     pubdate = data.get("pubdate")
     if pubdate is not None:
-        from datetime import datetime, timezone
         try:
-            video.published_at = datetime.fromtimestamp(float(pubdate), tz=timezone.utc).isoformat()
+            video.published_at = datetime.fromtimestamp(float(pubdate), tz=timezone.utc)
         except (TypeError, ValueError, OSError):
             pass  # 无法解析的时间戳保持为 None
 

@@ -6,7 +6,7 @@ from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.video import VideoParseRequest, VideoParseResponse, VideoHistoryResponse, VideoDetailResponse, VideoSummaryResponse
 from app.services.video_service import VideoService
-from app.models.summary import VideoSummary
+from app.services.access_control import get_latest_video_summary_for_user
 
 router = APIRouter(prefix="/api/videos", tags=["视频"])
 
@@ -33,7 +33,7 @@ def get_history(
 @router.get("/{video_id}", response_model=VideoDetailResponse)
 def get_video(video_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """获取视频详情和分 P 列表"""
-    return VideoService(db).get_video_detail(video_id)
+    return VideoService(db).get_video_detail(video_id, current_user.id)
 
 
 @router.delete("/{video_id}/history", status_code=204)
@@ -49,7 +49,7 @@ def delete_video_history(
 @router.get("/{video_id}/summary", response_model=VideoSummaryResponse)
 def get_video_summary(video_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """获取视频的全视频总览总结"""
-    vs = db.query(VideoSummary).filter(VideoSummary.video_id == video_id).order_by(VideoSummary.id.desc()).first()
+    vs = get_latest_video_summary_for_user(db, current_user.id, video_id)
     if not vs:
         from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="全视频总结尚未生成")

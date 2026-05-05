@@ -11,3 +11,4 @@ celery[redis]>=5.4
 redis>=5.2
 cryptography>=43
 httpx>=0.28
+yt-dlp>=2025.1.15

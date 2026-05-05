@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.integrations.bilibili.resolver import resolve
 from app.integrations.bilibili.metadata import fetch as fetch_metadata
 from app.repositories import video_repository
+from app.services.access_control import ensure_video_access
 from app.schemas.video import (
     VideoInfoResponse,
     PartResponse,
@@ -136,10 +137,13 @@ class VideoService:
 
         return VideoHistoryResponse(items=items, total=total, page=page, page_size=page_size)
 
-    def get_video_detail(self, video_id: int) -> VideoDetailResponse:
-        video = video_repository.get_video_by_id(self.db, video_id)
-        if not video:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="视频不存在")
+    def get_video_detail(self, video_id: int, user_id: int | None = None) -> VideoDetailResponse:
+        if user_id is not None:
+            video = ensure_video_access(self.db, user_id, video_id)
+        else:
+            video = video_repository.get_video_by_id(self.db, video_id)
+            if not video:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="视频不存在")
 
         parts = video_repository.get_parts_by_video(self.db, video_id)
         return VideoDetailResponse(

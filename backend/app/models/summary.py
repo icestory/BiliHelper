@@ -16,6 +16,9 @@ class PartSummary(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     video_part_id: Mapped[int] = mapped_column(ForeignKey("video_parts.id"), nullable=False, index=True)
+    part_analysis_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("part_analysis_tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     detailed_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     key_points: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
@@ -30,6 +33,9 @@ class Chapter(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     video_part_id: Mapped[int] = mapped_column(ForeignKey("video_parts.id"), nullable=False, index=True)
+    part_analysis_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("part_analysis_tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     start_time: Mapped[float] = mapped_column(Float, nullable=False)
     end_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -43,6 +49,9 @@ class VideoSummary(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     video_id: Mapped[int] = mapped_column(ForeignKey("videos.id"), nullable=False, index=True)
+    analysis_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("analysis_tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     detailed_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     part_overview: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # 每 P 摘要

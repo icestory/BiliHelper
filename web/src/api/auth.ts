@@ -17,3 +17,10 @@ export function register(username: string, password: string, email?: string) {
 export function getMe() {
   return apiFetch("/auth/me");
 }
+
+export function logout(refreshToken: string) {
+  return apiFetch("/auth/logout", {
+    method: "POST",
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+}

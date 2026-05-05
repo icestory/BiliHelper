@@ -4,8 +4,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.task import AnalysisTask, PartAnalysisTask
-from app.models.video import VideoPart
+from app.core.config import settings
 from app.repositories import video_repository
+from app.services.access_control import get_latest_part_task, user_has_video_access
 from app.schemas.analysis import (
     AnalysisTaskCreate,
     AnalysisTaskResponse,
@@ -27,16 +28,22 @@ class AnalysisService:
         video = video_repository.get_video_by_id(self.db, data.video_id)
         if not video:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="视频不存在")
+        if video.duration and video.duration > settings.MAX_VIDEO_DURATION_SECONDS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="视频时长超过系统限制")
 
         # 获取要分析的分 P
         all_parts = video_repository.get_parts_by_video(self.db, data.video_id)
         if data.part_ids:
             selected_parts = [p for p in all_parts if p.id in data.part_ids]
+            if len(selected_parts) != len(set(data.part_ids)):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="包含无效或不属于该视频的分 P")
         else:
             selected_parts = all_parts
 
         if not selected_parts:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="没有选择需要分析的分 P")
+        if len(selected_parts) > settings.MAX_PARTS_PER_TASK:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="选择的分 P 数量超过系统限制")
 
         # 创建总任务
         task = AnalysisTask(
@@ -87,27 +94,31 @@ class AnalysisService:
         from app.models.transcript import TranscriptSegment
         from app.models.summary import PartSummary, Chapter
 
-        # 获取最新的子任务
-        sub = (
-            self.db.query(PartAnalysisTask)
-            .filter(PartAnalysisTask.video_part_id == part_id)
-            .order_by(PartAnalysisTask.id.desc())
-            .first()
-        )
-
-        # 权限检查：验证用户是否拥有该分析数据
-        if user_id is not None and sub is not None:
-            task = self.db.query(AnalysisTask).filter(AnalysisTask.id == sub.analysis_task_id).first()
-            if task and task.user_id != user_id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问此分析数据")
-
         part = video_repository.get_part_by_id(self.db, part_id)
+        if not part:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分 P 不存在")
+
+        # 获取当前用户自己的最新子任务，避免读取其他用户的分析结果
+        if user_id is not None:
+            sub = get_latest_part_task(self.db, user_id, part_id)
+            if not sub:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析结果不存在")
+        else:
+            sub = (
+                self.db.query(PartAnalysisTask)
+                .filter(PartAnalysisTask.video_part_id == part_id)
+                .order_by(PartAnalysisTask.id.desc())
+                .first()
+            )
 
         segments = None
         if sub and sub.status == "completed":
             segs = (
                 self.db.query(TranscriptSegment)
-                .filter(TranscriptSegment.video_part_id == part_id)
+                .filter(
+                    TranscriptSegment.video_part_id == part_id,
+                    TranscriptSegment.part_analysis_task_id == sub.id,
+                )
                 .order_by(TranscriptSegment.sequence_no)
                 .all()
             )
@@ -121,7 +132,7 @@ class AnalysisService:
         if sub and sub.status == "completed":
             ps = (
                 self.db.query(PartSummary)
-                .filter(PartSummary.video_part_id == part_id)
+                .filter(PartSummary.video_part_id == part_id, PartSummary.part_analysis_task_id == sub.id)
                 .order_by(PartSummary.id.desc())
                 .first()
             )
@@ -134,7 +145,7 @@ class AnalysisService:
 
             chs = (
                 self.db.query(Chapter)
-                .filter(Chapter.video_part_id == part_id)
+                .filter(Chapter.video_part_id == part_id, Chapter.part_analysis_task_id == sub.id)
                 .order_by(Chapter.sequence_no)
                 .all()
             )
@@ -213,6 +224,8 @@ class AnalysisService:
         video = video_repository.get_video_by_id(self.db, part.video_id)
         if not video:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="视频不存在")
+        if not user_has_video_access(self.db, user_id, part.video_id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权重新分析此分 P")
 
         # 创建独立的任务
         task = AnalysisTask(

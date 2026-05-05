@@ -31,6 +31,15 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 
+@router.post("/logout", status_code=204)
+def logout(
+    body: RefreshRequest,
+    db: Session = Depends(get_db),
+):
+    svc = AuthService(db)
+    svc.revoke_refresh_token(body.refresh_token)
+
+
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
     return current_user
