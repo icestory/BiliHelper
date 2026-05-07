@@ -13,4 +13,5 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    imports=["app.workers.tasks.analyze_part"],  # 确保 Worker 启动时注册任务
 )
