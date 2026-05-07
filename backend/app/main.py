@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.auth import router as auth_router
+from app.api.bilibili_credentials import router as bilibili_credentials_router
 from app.api.llm_configs import router as llm_configs_router
 from app.api.videos import router as videos_router
 from app.api.analysis_tasks import router as analysis_router
@@ -20,6 +21,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(bilibili_credentials_router)
 app.include_router(llm_configs_router)
 app.include_router(videos_router)
 app.include_router(analysis_router)

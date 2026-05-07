@@ -90,16 +90,28 @@ def _parse_response(data: dict[str, Any]) -> VideoInfo:
     return VideoInfo(video=video, parts=parts)
 
 
-def fetch(video_ref) -> VideoInfo:
+def _build_headers(cookies: dict[str, str] | None = None) -> dict[str, str]:
+    """构造请求头，可选注入 B 站登录 Cookie"""
+    headers = dict(_DEFAULT_HEADERS)
+    if cookies:
+        cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        headers["Cookie"] = cookie_str
+    return headers
+
+
+def fetch(video_ref, cookies: dict[str, str] | None = None) -> VideoInfo:
     """
     根据 VideoRef 获取视频元信息和分 P 列表
+
+    Args:
+        cookies: 可选的 B 站 Cookie dict（SESSDATA, bili_jct, buvid3），用于海外访问或风控绕过
 
     Raises:
         httpx.HTTPError: 网络请求失败
         ValueError: 响应数据无效
     """
     url = _build_url(video_ref)
-    resp = httpx.get(url, headers=_DEFAULT_HEADERS, timeout=15)
+    resp = httpx.get(url, headers=_build_headers(cookies), timeout=15)
     resp.raise_for_status()
 
     body = resp.json()

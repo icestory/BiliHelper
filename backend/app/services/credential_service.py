@@ -7,9 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import encrypt_api_key, decrypt_api_key
-from app.models.user import ApiCredential
+from app.models.user import ApiCredential, BilibiliCredential
 from app.repositories import credential_repository
-from app.schemas.credential import ApiCredentialCreate, ApiCredentialUpdate, ApiCredentialResponse
+from app.schemas.credential import (
+    ApiCredentialCreate, ApiCredentialUpdate, ApiCredentialResponse,
+    BilibiliCredentialCreate, BilibiliCredentialUpdate, BilibiliCredentialResponse,
+)
 
 
 def mask_api_key(key: str) -> str:
@@ -17,6 +20,13 @@ def mask_api_key(key: str) -> str:
     if len(key) <= 7:
         return "****"
     return f"{key[:3]}{'*' * 4}{key[-4:]}"
+
+
+def mask_cookie(value: str) -> str:
+    """脱敏展示 Cookie 值：保留前 4 位和后 4 位"""
+    if len(value) <= 10:
+        return "****"
+    return f"{value[:4]}{'*' * 4}{value[-4:]}"
 
 
 def _is_blocked_ip(ip: str) -> bool:
@@ -147,3 +157,93 @@ class CredentialService:
         credential_repository.unset_default_for_user(self.db, user_id)
         cred = credential_repository.update_credential(self.db, cred, is_default=True)
         return _to_response(cred)
+
+
+# ============ B 站 Cookie 凭证 ============
+
+def _bili_to_response(cred: BilibiliCredential) -> BilibiliCredentialResponse:
+    sessdata = decrypt_api_key(cred.sessdata_encrypted) if cred.sessdata_encrypted else ""
+    bili_jct = decrypt_api_key(cred.bili_jct_encrypted) if cred.bili_jct_encrypted else ""
+    buvid3 = decrypt_api_key(cred.buvid3_encrypted) if cred.buvid3_encrypted else None
+    return BilibiliCredentialResponse(
+        id=cred.id,
+        sessdata_masked=mask_cookie(sessdata),
+        bili_jct_masked=mask_cookie(bili_jct),
+        buvid3_masked=mask_cookie(buvid3) if buvid3 else None,
+        enabled=cred.enabled,
+        updated_at=cred.updated_at.isoformat() if cred.updated_at else "",
+    )
+
+
+class BilibiliCredentialService:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def list(self, user_id: int) -> list[BilibiliCredentialResponse]:
+        creds = credential_repository.get_bilibili_credentials_by_user(self.db, user_id)
+        return [_bili_to_response(c) for c in creds]
+
+    def create(self, user_id: int, data: BilibiliCredentialCreate) -> BilibiliCredentialResponse:
+        # 如果本次设为启用，先把旧的启用凭证禁用
+        if data.enabled:
+            credential_repository.unset_enabled_bilibili_for_user(self.db, user_id)
+
+        cred = credential_repository.create_bilibili_credential(
+            self.db,
+            user_id=user_id,
+            sessdata_encrypted=encrypt_api_key(data.sessdata),
+            bili_jct_encrypted=encrypt_api_key(data.bili_jct),
+            buvid3_encrypted=encrypt_api_key(data.buvid3) if data.buvid3 else None,
+            enabled=data.enabled,
+        )
+        return _bili_to_response(cred)
+
+    def update(self, user_id: int, credential_id: int, data: BilibiliCredentialUpdate) -> BilibiliCredentialResponse:
+        cred = credential_repository.get_bilibili_credential_by_id(self.db, credential_id)
+        if not cred or cred.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="凭证不存在")
+
+        if data.enabled:
+            credential_repository.unset_enabled_bilibili_for_user(self.db, user_id)
+
+        kwargs: dict = {}
+        if data.sessdata is not None:
+            kwargs["sessdata_encrypted"] = encrypt_api_key(data.sessdata)
+        if data.bili_jct is not None:
+            kwargs["bili_jct_encrypted"] = encrypt_api_key(data.bili_jct)
+        if data.buvid3 is not None:
+            kwargs["buvid3_encrypted"] = encrypt_api_key(data.buvid3)
+        if data.enabled is not None:
+            kwargs["enabled"] = data.enabled
+
+        cred = credential_repository.update_bilibili_credential(self.db, cred, **kwargs)
+        return _bili_to_response(cred)
+
+    def delete(self, user_id: int, credential_id: int) -> None:
+        cred = credential_repository.get_bilibili_credential_by_id(self.db, credential_id)
+        if not cred or cred.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="凭证不存在")
+        credential_repository.delete_bilibili_credential(self.db, cred)
+
+    def set_enabled(self, user_id: int, credential_id: int) -> BilibiliCredentialResponse:
+        cred = credential_repository.get_bilibili_credential_by_id(self.db, credential_id)
+        if not cred or cred.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="凭证不存在")
+        credential_repository.unset_enabled_bilibili_for_user(self.db, user_id)
+        cred = credential_repository.update_bilibili_credential(self.db, cred, enabled=True)
+        return _bili_to_response(cred)
+
+    def get_enabled_cookies(self, user_id: int) -> dict[str, str] | None:
+        """获取用户当前启用的 B 站 Cookie，用于注入 HTTP 请求。返回 None 表示未配置。"""
+        cred = credential_repository.get_enabled_bilibili_credential(self.db, user_id)
+        if not cred:
+            return None
+
+        cookies = {}
+        if cred.sessdata_encrypted:
+            cookies["SESSDATA"] = decrypt_api_key(cred.sessdata_encrypted)
+        if cred.bili_jct_encrypted:
+            cookies["bili_jct"] = decrypt_api_key(cred.bili_jct_encrypted)
+        if cred.buvid3_encrypted:
+            cookies["buvid3"] = decrypt_api_key(cred.buvid3_encrypted)
+        return cookies if cookies else None

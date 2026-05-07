@@ -12,6 +12,14 @@ _DEFAULT_HEADERS = {
     "Referer": "https://www.bilibili.com/",
 }
 
+
+def _build_headers(cookies: dict[str, str] | None = None) -> dict[str, str]:
+    headers = dict(_DEFAULT_HEADERS)
+    if cookies:
+        cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        headers["Cookie"] = cookie_str
+    return headers
+
 # 字幕来源优先级
 _SUBTITLE_LAN_PRIORITY = [
     "zh-CN", "zh-Hans",  # 简体中文
@@ -28,10 +36,10 @@ class SubtitleSegment:
     text: str
 
 
-def fetch_subtitle_list(bvid: str, cid: int) -> list[dict]:
+def fetch_subtitle_list(bvid: str, cid: int, cookies: dict[str, str] | None = None) -> list[dict]:
     """获取视频某 P 的字幕列表"""
     url = f"{BILIBILI_PLAYER_API}?bvid={bvid}&cid={cid}"
-    resp = httpx.get(url, headers=_DEFAULT_HEADERS, timeout=15)
+    resp = httpx.get(url, headers=_build_headers(cookies), timeout=15)
     resp.raise_for_status()
 
     body = resp.json()
@@ -58,12 +66,12 @@ def pick_best_subtitle(subtitles: list[dict]) -> dict | None:
     return subtitles[0]
 
 
-def download_and_parse(subtitle_url: str) -> list[SubtitleSegment]:
+def download_and_parse(subtitle_url: str, cookies: dict[str, str] | None = None) -> list[SubtitleSegment]:
     """下载并解析 B 站字幕 JSON"""
     if subtitle_url.startswith("//"):
         subtitle_url = "https:" + subtitle_url
 
-    resp = httpx.get(subtitle_url, headers=_DEFAULT_HEADERS, timeout=15)
+    resp = httpx.get(subtitle_url, headers=_build_headers(cookies), timeout=15)
     resp.raise_for_status()
 
     data = resp.json()
@@ -86,15 +94,18 @@ def download_and_parse(subtitle_url: str) -> list[SubtitleSegment]:
     return segments
 
 
-def get_subtitles(bvid: str, cid: int) -> tuple[list[SubtitleSegment], str | None]:
+def get_subtitles(bvid: str, cid: int, cookies: dict[str, str] | None = None) -> tuple[list[SubtitleSegment], str | None]:
     """
     获取视频分 P 的标准化学幕
+
+    Args:
+        cookies: 可选的 B 站 Cookie dict
 
     Returns:
         (segments, source) — source 为 "bili_subtitle" 或 None（无可用字幕）
     """
     try:
-        subtitle_list = fetch_subtitle_list(bvid, cid)
+        subtitle_list = fetch_subtitle_list(bvid, cid, cookies=cookies)
     except Exception:
         return [], None
 
@@ -107,7 +118,7 @@ def get_subtitles(bvid: str, cid: int) -> tuple[list[SubtitleSegment], str | Non
         return [], None
 
     try:
-        segments = download_and_parse(subtitle_url)
+        segments = download_and_parse(subtitle_url, cookies=cookies)
     except Exception:
         return [], None
 
@@ -122,10 +133,10 @@ def get_subtitles(bvid: str, cid: int) -> tuple[list[SubtitleSegment], str | Non
     return segments, "bili_subtitle"
 
 
-def check_subtitle_available(bvid: str, cid: int) -> bool:
+def check_subtitle_available(bvid: str, cid: int, cookies: dict[str, str] | None = None) -> bool:
     """快速检查是否有可用字幕（不下载内容）"""
     try:
-        subtitle_list = fetch_subtitle_list(bvid, cid)
+        subtitle_list = fetch_subtitle_list(bvid, cid, cookies=cookies)
         return pick_best_subtitle(subtitle_list) is not None
     except Exception:
         return False

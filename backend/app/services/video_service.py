@@ -5,6 +5,7 @@ from app.integrations.bilibili.resolver import resolve
 from app.integrations.bilibili.metadata import fetch as fetch_metadata
 from app.repositories import video_repository
 from app.services.access_control import ensure_video_access
+from app.services.credential_service import BilibiliCredentialService
 from app.schemas.video import (
     VideoInfoResponse,
     PartResponse,
@@ -20,14 +21,19 @@ class VideoService:
         self.db = db
 
     def parse(self, url: str, user_id: int | None = None) -> VideoParseResponse:
+        # 获取用户启用的 B 站 Cookie
+        cookies = None
+        if user_id is not None:
+            cookies = BilibiliCredentialService(self.db).get_enabled_cookies(user_id)
+
         # 1. 解析链接
-        ref = resolve(url)
+        ref = resolve(url, cookies=cookies)
         if not ref.is_valid:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无法识别 B 站链接，请检查 URL 格式")
 
         # 2. 获取 B 站元信息
         try:
-            info = fetch_metadata(ref)
+            info = fetch_metadata(ref, cookies=cookies)
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"获取 B 站视频信息失败: {str(e)}")
 

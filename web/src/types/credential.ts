@@ -10,3 +10,12 @@ export interface ApiCredentialResponse {
   created_at: string;
   updated_at: string;
 }
+
+export interface BilibiliCredentialResponse {
+  id: number;
+  sessdata_masked: string;
+  bili_jct_masked: string;
+  buvid3_masked: string | null;
+  enabled: boolean;
+  updated_at: string;
+}

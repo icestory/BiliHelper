@@ -43,10 +43,13 @@ def _extract_url(text: str) -> str | None:
     return None
 
 
-def _expand_short_link(short_url: str) -> str | None:
+def _expand_short_link(short_url: str, cookies: dict[str, str] | None = None) -> str | None:
     """展开 b23.tv 短链接"""
     try:
-        resp = httpx.head(short_url, follow_redirects=False, timeout=10)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        if cookies:
+            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        resp = httpx.head(short_url, follow_redirects=False, timeout=10, headers=headers)
         # b23.tv 返回 302
         location = resp.headers.get("location", "")
         if location:
@@ -57,9 +60,12 @@ def _expand_short_link(short_url: str) -> str | None:
     return None
 
 
-def resolve(text: str) -> VideoRef:
+def resolve(text: str, cookies: dict[str, str] | None = None) -> VideoRef:
     """
     从用户输入的文本（URL 或分享文本）中提取视频信息
+
+    Args:
+        cookies: 可选的 B 站 Cookie dict
 
     返回 VideoRef，无效时 bvid/aid 均为 None
     """
@@ -69,7 +75,7 @@ def resolve(text: str) -> VideoRef:
 
     # 短链展开
     if _SHORT_LINK_PATTERN.match(url):
-        expanded = _expand_short_link(url)
+        expanded = _expand_short_link(url, cookies=cookies)
         if expanded:
             url = expanded
 

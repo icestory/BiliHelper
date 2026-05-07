@@ -18,7 +18,7 @@ from app.integrations.bilibili.subtitles import get_subtitles, SubtitleSegment
 from app.integrations.bilibili.audio import extract_audio, cleanup_audio
 from app.integrations.asr import OpenAIASRProvider
 from app.services.llm_factory import create_llm_provider
-from app.services.credential_service import validate_api_base_url
+from app.services.credential_service import validate_api_base_url, BilibiliCredentialService
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +187,9 @@ def start_analysis(self, task_id: int):
                 sub.started_at = _utcnow()
                 db.commit()
 
-                segments, source = get_subtitles(video.bvid, part.cid or 0)
+                # 获取用户启用的 B 站 Cookie（用于海外访问或风控场景）
+                cookies = BilibiliCredentialService(db).get_enabled_cookies(task.user_id)
+                segments, source = get_subtitles(video.bvid, part.cid or 0, cookies=cookies)
 
                 if not segments:
                     # ASR 兜底：提取临时音频 → 语音识别
