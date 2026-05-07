@@ -8,6 +8,47 @@ import httpx
 from app.integrations.llm.base import LLMProvider
 
 
+def _try_extract_json(content: str) -> dict[str, Any]:
+    """尝试从 LLM 输出中提取 JSON，容错多种格式"""
+    # 1. 直接解析
+    try:
+        val = json.loads(content)
+        if isinstance(val, dict):
+            return val
+    except json.JSONDecodeError:
+        pass
+
+    # 2. 提取 ```json ... ``` 代码块
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # 3. 找到第一个 { 和最后一个 } 之间的内容
+    start = content.find("{")
+    end = content.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(content[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    # 4. 找到第一个 [ 和最后一个 ] 之间的内容（可能是数组）
+    start = content.find("[")
+    end = content.rfind("]")
+    if start != -1 and end != -1 and end > start:
+        try:
+            val = json.loads(content[start:end + 1])
+            if isinstance(val, list):
+                return {"items": val}
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"LLM 返回内容无法解析为 JSON: {content[:300]}")
+
+
 class OpenAICompatibleProvider(LLMProvider):
     def __init__(self, api_key: str, base_url: str | None = None, default_model: str | None = None):
         self.api_key = api_key
@@ -39,15 +80,14 @@ class OpenAICompatibleProvider(LLMProvider):
                 {"role": "user", "content": user_message},
             ],
         }
-        # response_format 仅对 openai 系 provider 启用
-        if not self.base_url or "openai.com" in self.base_url or "/v1" in (self.base_url or ""):
+        # response_format 仅对 OpenAI 官方 API 启用，避免第三方兼容接口异常
+        if "api.openai.com" in self.base_url:
             body["response_format"] = {"type": "json_object"}
 
         resp = httpx.post(url, headers=headers, json=body, timeout=120)
         resp.raise_for_status()
 
         data = resp.json()
-        # 防御性检查：API 可能返回异常结构
         if "choices" not in data or len(data["choices"]) == 0:
             raise ValueError(f"LLM API 返回异常: choices 为空 — {str(data)[:200]}")
         if "message" not in data["choices"][0] or "content" not in data["choices"][0]["message"]:
@@ -56,11 +96,4 @@ class OpenAICompatibleProvider(LLMProvider):
         if content is None:
             raise ValueError("LLM 返回 content 为 null")
 
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            # 尝试从 markdown code block 中提取 JSON
-            match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
-            if match:
-                return json.loads(match.group(1))
-            raise ValueError(f"LLM 返回内容无法解析为 JSON: {content[:200]}")
+        return _try_extract_json(content)
