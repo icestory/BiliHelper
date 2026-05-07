@@ -2,8 +2,11 @@
 B 站字幕获取器
 获取并标准化 B 站字幕（UP 主上传 > 自动字幕 > AI 字幕）
 """
+import logging
 import httpx
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 BILIBILI_PLAYER_API = "https://api.bilibili.com/x/player/v2"
 
@@ -54,6 +57,11 @@ def pick_best_subtitle(subtitles: list[dict]) -> dict | None:
     """从字幕列表中按优先级选择最佳字幕"""
     if not subtitles:
         return None
+
+    # 打印所有可用字幕轨道，便于排查
+    for s in subtitles:
+        logger.info("字幕轨道: lan=%s lan_doc=%s author=%s type=%s",
+                     s.get("lan"), s.get("lan_doc"), s.get("author", {}).get("name", ""), s.get("type"))
 
     # 按语言优先级排序，同时优先 UP 主上传字幕
     for lang in _SUBTITLE_LAN_PRIORITY:

@@ -193,6 +193,12 @@ def start_analysis(self, task_id: int):
                              video.bvid, part.cid, part.title, video.title)
                 segments, source = get_subtitles(video.bvid, part.cid or 0, cookies=cookies)
 
+                if segments:
+                    # 打印字幕前 200 字，方便确认内容是否匹配视频
+                    preview = "".join(s.text for s in segments[:5])[:200]
+                    logger.info("字幕获取成功: bvid=%s source=%s segments=%d preview=%s",
+                                 video.bvid, source, len(segments), preview)
+
                 if not segments:
                     logger.info("无字幕，走 ASR 兜底: bvid=%s cid=%s", video.bvid, part.cid)
                     # ASR 兜底：提取临时音频 → 语音识别
