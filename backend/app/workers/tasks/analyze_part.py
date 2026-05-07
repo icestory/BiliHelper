@@ -189,9 +189,12 @@ def start_analysis(self, task_id: int):
 
                 # 获取用户启用的 B 站 Cookie（用于海外访问或风控场景）
                 cookies = BilibiliCredentialService(db).get_enabled_cookies(task.user_id)
+                logger.info("开始分析: bvid=%s cid=%s part_title=%s video_title=%s",
+                             video.bvid, part.cid, part.title, video.title)
                 segments, source = get_subtitles(video.bvid, part.cid or 0, cookies=cookies)
 
                 if not segments:
+                    logger.info("无字幕，走 ASR 兜底: bvid=%s cid=%s", video.bvid, part.cid)
                     # ASR 兜底：提取临时音频 → 语音识别
                     sub.status = "extracting_audio"
                     sub.progress = 10
@@ -199,7 +202,7 @@ def start_analysis(self, task_id: int):
 
                     audio_path = None
                     try:
-                        audio_path = extract_audio(video.bvid, part.cid or 0, part.page_no)
+                        audio_path = extract_audio(video.bvid, part.cid or 0, part.page_no, cookies=cookies)
 
                         sub.status = "transcribing"
                         sub.progress = 25
@@ -227,6 +230,7 @@ def start_analysis(self, task_id: int):
                             continue
 
                         source = "asr"
+                        logger.info("ASR 转写完成: bvid=%s segments=%d", video.bvid, len(segments) if segments else 0)
                     finally:
                         if audio_path:
                             cleanup_audio(audio_path)
@@ -251,7 +255,7 @@ def start_analysis(self, task_id: int):
                     transcript_text = _build_transcript_text(segments)
                     result = llm.chat_json(
                         system_prompt=prompt_text,
-                        user_message=f"以下是视频「{part.title or video.title}」的文案，请分析：\n\n{transcript_text}",
+                        user_message=f"视频「{part.title or video.title}」（{video.bvid}）的文案如下，请基于此内容分析：\n\n{transcript_text}",
                     )
                 else:
                     # 长文案：逐 chunk 局部摘要后合并
@@ -260,7 +264,7 @@ def start_analysis(self, task_id: int):
                         chunk_text = _build_transcript_text(chunk)
                         partial = llm.chat_json(
                             system_prompt="请对以下视频文案片段生成摘要和关键要点，输出JSON格式：{\"summary\": \"...\", \"key_points\": [...]}",
-                            user_message=f"片段 {i + 1}/{len(chunks)}：\n\n{chunk_text}",
+                            user_message=f"视频「{part.title or video.title}」片段 {i + 1}/{len(chunks)}：\n\n{chunk_text}",
                         )
                         chunk_summaries.append(partial)
 
@@ -271,7 +275,7 @@ def start_analysis(self, task_id: int):
                     )
                     result = llm.chat_json(
                         system_prompt=prompt_text,
-                        user_message=f"视频「{part.title or video.title}」各片段分析结果如下，请整合生成完整的总结和章节：\n\n{merged}",
+                        user_message=f"视频「{part.title or video.title}」（{video.bvid}）各片段分析结果如下，请基于原视频内容整合生成完整的总结和章节：\n\n{merged}",
                     )
 
                 # Step 4: 校验并保存结果

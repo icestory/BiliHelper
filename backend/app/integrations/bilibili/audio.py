@@ -16,7 +16,7 @@ def _ensure_temp_dir():
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def extract_audio(bvid: str, cid: int, page_no: int = 1) -> str:
+def extract_audio(bvid: str, cid: int, page_no: int = 1, cookies: dict[str, str] | None = None) -> str:
     """
     提取指定分 P 的音频为 mono 16kHz wav 文件
 
@@ -24,6 +24,7 @@ def extract_audio(bvid: str, cid: int, page_no: int = 1) -> str:
         bvid: BV 号
         cid: 分 P 的 cid
         page_no: 分 P 序号
+        cookies: 可选的 B 站 Cookie dict，用于海外访问
 
     Returns:
         临时音频文件路径
@@ -37,15 +38,18 @@ def extract_audio(bvid: str, cid: int, page_no: int = 1) -> str:
     output_path = str(TEMP_DIR / f"{bvid}_p{page_no}_{uuid.uuid4().hex[:8]}.wav")
 
     # yt-dlp 提取音频 → FFmpeg 转换为 mono 16kHz wav
-    # 限制最长 30 分钟避免无限下载
     ytdlp_cmd = [
         "yt-dlp",
-        "-f", "bestaudio[filesize<100M]",  # 只取音频流，<100MB
+        "-f", "bestaudio[filesize<100M]",
         "--max-filesize", "100M",
         "--max-duration", "1800",
-        "-o", "-",                          # 输出到 stdout
-        video_url,
+        "-o", "-",
     ]
+    # 传递 B 站 Cookie 给 yt-dlp，确保海外服务器也能正确下载
+    if cookies:
+        cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        ytdlp_cmd.extend(["--add-header", f"Cookie: {cookie_str}"])
+    ytdlp_cmd.append(video_url)
 
     ffmpeg_cmd = [
         "ffmpeg",
