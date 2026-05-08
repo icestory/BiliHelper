@@ -49,58 +49,50 @@ def extract_audio(bvid: str, cid: int, page_no: int = 1, cookies: dict[str, str]
     video_url = f"https://www.bilibili.com/video/{bvid}?p={page_no}"
     output_path = str(TEMP_DIR / f"{bvid}_p{page_no}_{uuid.uuid4().hex[:8]}.wav")
     cookie_file = None
+    tmp_audio = str(TEMP_DIR / f"{bvid}_p{page_no}_{uuid.uuid4().hex[:8]}.tmp")
 
-    # yt-dlp 提取音频 → FFmpeg 转换为 mono 16kHz wav
     ytdlp_cmd = [
         "yt-dlp",
         "-f", "bestaudio[filesize<100M]",
         "--max-filesize", "100M",
         "--max-duration", "1800",
-        "-o", "-",
+        "-o", tmp_audio,
+        "--no-playlist",
     ]
-    # 写入 Netscape 格式 Cookie 文件传给 yt-dlp，确保海外服务器能下载
     if cookies:
         cookie_file = _write_netscape_cookie_file(cookies)
         ytdlp_cmd.extend(["--cookies", cookie_file])
     ytdlp_cmd.append(video_url)
 
-    ffmpeg_cmd = [
-        "ffmpeg",
-        "-i", "pipe:0",
-        "-ac", "1",
-        "-ar", "16000",
-        "-f", "wav",
-        "-y",
-        output_path,
-    ]
-
-    ytdlp_proc = None
     try:
-        ytdlp_proc = subprocess.Popen(
-            ytdlp_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        subprocess.run(ffmpeg_cmd, stdin=ytdlp_proc.stdout, check=True, timeout=900)
-        ytdlp_proc.wait(timeout=60)
-        # 检查 yt-dlp 是否成功（退出码非 0 时输出 stderr 便于排查）
-        if ytdlp_proc.returncode != 0:
-            stderr = ytdlp_proc.stderr.read().decode("utf-8", errors="replace")[-500:] if ytdlp_proc.stderr else ""
-            raise RuntimeError(f"yt-dlp 下载失败 (exit={ytdlp_proc.returncode}): {stderr}")
+        # Step 1: yt-dlp 下载音频到临时文件
+        ytdlp_result = subprocess.run(ytdlp_cmd, capture_output=True, timeout=600)
+        if ytdlp_result.returncode != 0:
+            stderr = ytdlp_result.stderr.decode("utf-8", errors="replace")[-800:]
+            raise RuntimeError(f"yt-dlp 下载失败 (exit={ytdlp_result.returncode}): {stderr}")
+
+        if not os.path.exists(tmp_audio) or os.path.getsize(tmp_audio) == 0:
+            stderr = ytdlp_result.stderr.decode("utf-8", errors="replace")[-500:]
+            raise RuntimeError(f"yt-dlp 输出文件为空: {stderr}")
+
+        # Step 2: ffmpeg 转换为 mono 16kHz wav
+        subprocess.run([
+            "ffmpeg",
+            "-i", tmp_audio,
+            "-ac", "1",
+            "-ar", "16000",
+            "-f", "wav",
+            "-y",
+            output_path,
+        ], check=True, timeout=300, capture_output=True)
+
     except subprocess.TimeoutExpired:
-        if ytdlp_proc:
-            ytdlp_proc.kill()
-            ytdlp_proc.wait(timeout=5)
-        raise RuntimeError("音频提取超时（超过 15 分钟）")
-    except RuntimeError:
-        raise
-    except Exception as e:
-        if ytdlp_proc:
-            ytdlp_proc.kill()
-            ytdlp_proc.wait(timeout=5)
-        raise RuntimeError(f"音频提取失败: {str(e)}")
+        raise RuntimeError("音频提取超时")
     finally:
-        # 清理临时 Cookie 文件
         if cookie_file and os.path.exists(cookie_file):
             os.remove(cookie_file)
+        if os.path.exists(tmp_audio):
+            os.remove(tmp_audio)
 
     if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
         raise RuntimeError("音频提取失败：输出文件为空")
